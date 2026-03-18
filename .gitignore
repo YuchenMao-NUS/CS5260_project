@@ -1,17 +1,15 @@
-# 排除 Python 缓存
-__pycache__/
-*.pyc
-
-# 排除你的虚拟环境文件夹 (如果你建在这里的话)
-venv/
-env/
 .env
+.env.local
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+dist/
+*.log
+.DS_Store
 
-# 排除所有数据和模型文件！
-*.pth
-*.pt
-*.safetensors
-data/
-dataset/
-*.csv
-*.json
+# Python build artifacts
+*.egg-info/
+build/
+.pytest_cache/

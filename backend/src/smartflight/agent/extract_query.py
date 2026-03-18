@@ -1,11 +1,9 @@
-from state import AgentState
+from smartflight.agent.state import AgentState
 from typing import List, Literal, Optional
 from openai import OpenAI
 from pydantic import BaseModel
 from datetime import datetime, timedelta
-
-
-client = OpenAI()
+import os
 
 
 # 结构化LLM输出的提取结果
@@ -25,6 +23,10 @@ class FlightQueryExtraction(BaseModel):
 
 
 def extract_query_node(state: AgentState) -> AgentState:
+    client = OpenAI() if os.environ.get("OPENAI_API_KEY") else None
+    if not client:
+        raise ValueError("OPENAI_API_KEY not set")
+        
     # 使用datetime获取当前时间
     today = datetime.now().strftime("%Y-%m-%d")
     user_input = state["user_input"]

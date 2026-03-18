@@ -1,7 +1,7 @@
 from langgraph.graph import END, StateGraph
-from nodes.extract_query import extract_query_node
-from nodes.extract_preference import extract_preference_node
-from state import AgentState
+from smartflight.agent.extract_query import extract_query_node
+from smartflight.agent.extract_preference import extract_preference_node
+from smartflight.agent.state import AgentState
 
 # 条件路由
 def route_after_extraction(state: AgentState) -> str:

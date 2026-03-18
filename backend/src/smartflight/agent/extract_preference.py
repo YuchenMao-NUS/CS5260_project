@@ -1,10 +1,8 @@
-from state import AgentState
+from smartflight.agent.state import AgentState
 from typing import List, Optional
 from openai import OpenAI
 from pydantic import BaseModel
-
-
-client = OpenAI()
+import os
 
 
 # 结构化LLM输出的提取结果
@@ -19,6 +17,10 @@ class FlightPreferenceExtraction(BaseModel):
 
 
 def extract_preference_node(state: AgentState) -> AgentState:
+    client = OpenAI() if os.environ.get("OPENAI_API_KEY") else None
+    if not client:
+        raise ValueError("OPENAI_API_KEY not set")
+        
     user_input = state["user_input"]
 
     system_prompt = """

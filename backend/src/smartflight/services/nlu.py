@@ -1,0 +1,57 @@
+"""NLU: Parse user intent from natural language using LangGraph agent."""
+
+import os
+from smartflight.agent.agent import graph
+
+def parse_flight_intent(message: str) -> dict:
+    """
+    Extract structured flight search parameters from user message using LLM.
+    """
+    input_state = {
+        "user_input": message,
+        "flight_query": None,
+        "flight_preference": None,
+        "error_message": None,
+    }
+    
+    try:
+        if not os.environ.get("OPENAI_API_KEY"):
+            raise ValueError("OPENAI_API_KEY not set")
+            
+        result = graph.invoke(input_state)
+        
+        intent = {
+            "flight_query": result.get("flight_query"),
+            "flight_preference": result.get("flight_preference"),
+            "error_message": result.get("error_message"),
+        }
+        return intent
+    except Exception as e:
+        # Fallback to rule-based placeholder if LLM fails or no API key
+        msg_lower = message.lower()
+        origins = {"singapore": "SIN", "sin": "SIN", "sg": "SIN"}
+        dests = {"tokyo": "TYO", "tyo": "TYO", "japan": "TYO", "osaka": "KIX"}
+        origin = "SIN"
+        destination = "TYO"
+        for k, v in origins.items():
+            if k in msg_lower:
+                origin = v
+                break
+        for k, v in dests.items():
+            if k in msg_lower:
+                destination = v
+                break
+                
+        return {
+            "flight_query": {
+                "from_airport": origin,
+                "to_airports": [destination],
+                "departure_date": "2026-04-15",
+                "return_date": None,
+                "passengers": 1,
+                "seat_classes": ["economy"],
+                "trip": "one_way"
+            },
+            "flight_preference": {},
+            "error_message": f"LLM parsing failed or disabled: {str(e)}"
+        }

@@ -1,0 +1,1 @@
+"""SmartFlight backend application."""

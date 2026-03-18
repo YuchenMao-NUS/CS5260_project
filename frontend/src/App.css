@@ -1,0 +1,418 @@
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 1.5rem;
+  background: #0f172a;
+  color: white;
+  text-align: center;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.75rem;
+}
+
+.subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  opacity: 0.85;
+}
+
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 1rem;
+}
+
+.welcome {
+  text-align: center;
+  color: #64748b;
+  padding: 2rem 1rem;
+}
+
+.welcome .hint {
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+}
+
+.message {
+  margin-bottom: 1rem;
+}
+
+.message.user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.message.assistant {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.message.assistant .bubble {
+  align-self: flex-start;
+}
+
+.message-flights-block {
+  width: 100%;
+  align-self: stretch;
+  margin-top: 0.5rem;
+}
+
+.bubble {
+  max-width: 85%;
+  padding: 0.75rem 1rem;
+  border-radius: 1rem;
+  line-height: 1.5;
+}
+
+.message.user .bubble {
+  background: #0f172a;
+  color: white;
+}
+
+.message.assistant .bubble {
+  background: white;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.bubble p {
+  margin: 0 0 0.5rem;
+}
+
+.bubble p:last-of-type {
+  margin-bottom: 0;
+}
+
+.flights {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+/* Flight filters - Google Flights style */
+.flight-filters {
+  margin-top: 0;
+  padding: 1rem 1.25rem;
+  background: #f1f5f9;
+  border: 2px solid #0f172a;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.filter-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.filter-toggle-icon {
+  font-size: 0.75rem;
+  color: #64748b;
+  transition: transform 0.2s ease;
+}
+
+.filter-toggle-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.filter-content {
+  margin-top: 1rem;
+}
+
+.filter-row {
+  margin-bottom: 0.75rem;
+}
+
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filter-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  min-width: 4rem;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.filter-chips-wrap {
+  flex-wrap: wrap;
+}
+
+.filter-chip {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 2px solid #94a3b8;
+  border-radius: 1.5rem;
+  background: white;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-chip:hover {
+  border-color: #0f172a;
+  color: #0f172a;
+}
+
+.filter-chip.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: white;
+}
+
+.filter-chip:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+}
+
+.filter-chip-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+  margin: 0;
+}
+
+.filter-chip-check input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.filter-select {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 2px solid #94a3b8;
+  border-radius: 0.375rem;
+  background: white;
+  color: #334155;
+  cursor: pointer;
+}
+
+.filter-result-count {
+  font-size: 0.8125rem;
+  color: #64748b;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.flight-results-intro {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9375rem;
+  color: #334155;
+}
+
+.flight-filters-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.flight-filters-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.flight-filters-wrapper .flights {
+  margin-top: 0.75rem;
+}
+
+.flight-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  background: #f8fafc;
+}
+
+.flight-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.airline-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.airline-logo-container {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-shrink: 0;
+}
+
+.airline-logo {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.airline-logo-placeholder {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #e2e8f0;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 4px;
+}
+
+.airline-logo-placeholder[hidden] {
+  display: none;
+}
+
+.airline {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.price {
+  font-weight: 700;
+  color: #059669;
+}
+
+.flight-details {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #475569;
+}
+
+.duration {
+  flex: 1;
+  text-align: center;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.flight-stops {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 0.25rem;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.page-btn {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.page-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.page-info {
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+.input-area {
+  display: flex;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+}
+
+.input-area input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+}
+
+.input-area input:focus {
+  outline: none;
+  border-color: #0f172a;
+}
+
+.input-area button {
+  padding: 0.75rem 1.25rem;
+  background: #0f172a;
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.input-area button:hover:not(:disabled) {
+  background: #1e293b;
+}
+
+.input-area button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
