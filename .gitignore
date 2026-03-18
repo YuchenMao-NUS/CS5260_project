@@ -1,0 +1,17 @@
+# 排除 Python 缓存
+__pycache__/
+*.pyc
+
+# 排除你的虚拟环境文件夹 (如果你建在这里的话)
+venv/
+env/
+.env
+
+# 排除所有数据和模型文件！
+*.pth
+*.pt
+*.safetensors
+data/
+dataset/
+*.csv
+*.json
