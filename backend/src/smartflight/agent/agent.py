@@ -28,20 +28,19 @@ def route_after_extraction(state: AgentState) -> str:
         return "end"
     return "extract_preference"
 
-# TODO
-# 第三节点：根据 flight_query 调用外部 API 检索机票（待实现）
+# 第三节点：根据 flight_query 调用外部 API 检索机票
 # def search_flights_node(state: AgentState) -> AgentState:
 #     return state
 
-# 第四节点：根据 flight_preference 对检索结果筛选排序（待实现）
+# 第四节点：根据 flight_preference 对检索结果筛选排序
 # def filter_flights_node(state: AgentState) -> AgentState:
 #     return state
 
+# TODO
 # 第五节点：将最终结果以网页等形式展示给用户（待实现）
 def display_flights_node(state: AgentState) -> AgentState:
+    # state["flight_choices"]
     return state
-
-
 
 builder = StateGraph(AgentState)
 
@@ -61,7 +60,7 @@ builder.add_conditional_edges(
     {
         "end": END,
         "extract_preference": "extract_preference",
-    },
+    }
 )
 
 builder.add_edge("extract_preference", "search_flights")
@@ -75,7 +74,7 @@ graph = builder.compile()
 # 测试
 if __name__ == "__main__":
     test_input = {
-        "user_input": "我想从北京出发去东京，下周五出发，一周后返回，希望直飞，预算4000元以内",
+        "user_input": "我想从北京出发去东京，下周五出发，一周后返回，希望直飞，预算30000元以内",
         "flight_query": None,
         "flight_preference": None,
         "error_message": None,

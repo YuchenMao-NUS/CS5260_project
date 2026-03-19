@@ -56,7 +56,7 @@ Extraction rules:
     logger.debug("[LLM] user_input: %s", user_input)
 
     response = client.beta.chat.completions.parse(
-        model="gpt-4.1", # gpt-4o-mini is too dumb
+        model="gpt-5-mini", # gpt-4o-mini is too dumb
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_input},
