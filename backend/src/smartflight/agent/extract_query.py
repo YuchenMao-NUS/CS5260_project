@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta
 import os
 
+import logging
+logger = logging.getLogger(__name__)
 
 # 结构化LLM输出的提取结果
 class FlightQueryExtraction(BaseModel):
@@ -15,9 +17,7 @@ class FlightQueryExtraction(BaseModel):
     to_airports: Optional[List[str]]                    # 目的地 IATA 码列表
     departure_date: Optional[str]                       # 出发日期 YYYY-MM-DD
     return_date: Optional[str]                          # 返回日期 YYYY-MM-DD
-    seat_classes: Optional[
-        List[Literal["business", "economy", "first", "premium-economy"]]
-    ]
+    seat_classes: Optional[Literal["business", "economy", "first", "premium-economy"]]
     passengers: Optional[int]
 
 
@@ -29,11 +29,12 @@ def extract_query_node(state: AgentState) -> AgentState:
         
     # 使用datetime获取当前时间
     today = datetime.now().strftime("%Y-%m-%d")
+    weekday = datetime.now().strftime("%A")
     user_input = state["user_input"]
 
     system_prompt = f"""
 You are a flight search assistant. Extract structured flight search parameters from the user's natural language input.
-Today's date is {today}.
+Today's date is {today}, {weekday}.
 
 Extraction rules:
 1. has_origin: Set to false if no departure city/airport is mentioned. In that case, leave all other fields null.
@@ -41,13 +42,16 @@ Extraction rules:
 3. trip: Infer from context. Keywords like "round trip", "return", "来回" → round_trip; otherwise → one_way.
 4. departure_date: If not mentioned, use today ({today}). Format: YYYY-MM-DD.
 5. return_date: Only set for round_trip. If not mentioned, default to departure_date + 7 days.
-6. seat_classes: If not specified, return all four: ["business", "economy", "first", "premium-economy"].
+6. seat_classes: If not specified, return "economy".
 7. passengers: If not specified, default to 1.
 8. to_airports: If no destination is mentioned, recommend 5 suitable destinations (as IATA codes) based on the origin.
 """.strip()
+    
+    logger.debug("[LLM] system_prompt:\n%s", system_prompt)
+    logger.debug("[LLM] user_input: %s", user_input)
 
     response = client.beta.chat.completions.parse(
-        model="gpt-4o-mini",
+        model="gpt-4.1", # gpt-4o-mini is too dumb
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_input},
@@ -75,9 +79,7 @@ Extraction rules:
     else:
         return_date = extraction.return_date  # one_way 时为 None
 
-    seat_classes = extraction.seat_classes or [
-        "business", "economy", "first", "premium-economy"
-    ]
+    seat_classes = extraction.seat_classes or "economy"
 
     flight_query = {
         "trip": extraction.trip,

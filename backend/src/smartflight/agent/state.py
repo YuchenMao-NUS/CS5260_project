@@ -1,5 +1,5 @@
 from typing import TypedDict, Optional, List, Literal
-
+from fast_flights.model import SingleFlight
 
 class FlightQuery(TypedDict):
     trip: Literal["one_way", "round_trip"]
@@ -7,7 +7,7 @@ class FlightQuery(TypedDict):
     to_airports: List[str]               # IATA 三字码列表（可能是推荐的5个）
     departure_date: str                  # YYYY-MM-DD
     return_date: Optional[str]           # YYYY-MM-DD，仅往返有效
-    seat_classes: List[Literal["business", "economy", "first", "premium-economy"]]
+    seat_classes: Literal["business", "economy", "first", "premium-economy"]
     passengers: int
 
 
@@ -19,9 +19,30 @@ class FlightPreference(TypedDict):
     max_duration: Optional[int]               # 飞行时长上限（分钟）
     min_duration: Optional[int]               # 飞行时长下限（分钟）
 
+class FlightInformation(TypedDict):
+    trip: Literal["one_way", "round_trip"]
+    from_airport: str
+    to_airport: str
+    departure_date: str
+    return_date: Optional[str]
+    # outbound ticket
+    is_direct: bool
+    airlines: List[str]
+    price: float
+    duration: int
+    flights: list[SingleFlight]
+    # inbound ticket
+    is_direct_2: Optional[bool]
+    airlines_2: Optional[List[str]]
+    price_2: Optional[float]
+    duration_2: Optional[int]
+    flights_2: Optional[list[SingleFlight]]
+    
+    
 
 class AgentState(TypedDict):
     user_input: str                                # 用户原始输入
     flight_query: Optional[FlightQuery]            # 提取出的检索条件
     flight_preference: Optional[FlightPreference]  # 提取出的用户偏好
     error_message: Optional[str]                   # 节点错误信息（缺少出发地）
+    flight_choices: Optional[List[FlightInformation]]

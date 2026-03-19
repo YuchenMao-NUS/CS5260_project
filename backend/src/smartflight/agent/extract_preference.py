@@ -4,6 +4,9 @@ from openai import OpenAI
 from pydantic import BaseModel
 import os
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 # 结构化LLM输出的提取结果
 class FlightPreferenceExtraction(BaseModel):
@@ -48,9 +51,12 @@ Extraction rules:
    - If user says "less than 3 hours", set max_duration=180, min_duration=null
    - null if not mentioned
 """.strip()
+    
+    logger.debug("[LLM] system_prompt:\n%s", system_prompt)
+    logger.debug("[LLM] user_input: %s", user_input)
 
     response = client.beta.chat.completions.parse(
-        model="gpt-4o-mini",
+        model="gpt-4.1", # gpt-4o-mini is too dumb
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_input},
