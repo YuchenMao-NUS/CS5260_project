@@ -1,7 +1,7 @@
 """NLU: Parse user intent from natural language using LangGraph agent."""
 
-import os
 from smartflight.agent.agent import graph
+from smartflight.config import settings
 
 def parse_flight_intent(message: str) -> dict:
     """
@@ -15,7 +15,7 @@ def parse_flight_intent(message: str) -> dict:
     }
     
     try:
-        if not os.environ.get("OPENAI_API_KEY"):
+        if not settings.openai_enabled:
             raise ValueError("OPENAI_API_KEY not set")
             
         result = graph.invoke(input_state)

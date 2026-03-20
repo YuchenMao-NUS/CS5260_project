@@ -2,9 +2,9 @@ from smartflight.agent.state import AgentState
 from typing import List, Optional
 from openai import OpenAI
 from pydantic import BaseModel
-import os
 
 import logging
+from smartflight.config import settings
 logger = logging.getLogger(__name__)
 
 
@@ -20,7 +20,8 @@ class FlightPreferenceExtraction(BaseModel):
 
 
 def extract_preference_node(state: AgentState) -> AgentState:
-    client = OpenAI() if os.environ.get("OPENAI_API_KEY") else None
+    api_key = settings.openai_api_key
+    client = OpenAI(api_key=api_key) if api_key else None
     if not client:
         raise ValueError("OPENAI_API_KEY not set")
         

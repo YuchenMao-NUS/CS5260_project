@@ -3,9 +3,9 @@ from typing import List, Literal, Optional
 from openai import OpenAI
 from pydantic import BaseModel
 from datetime import datetime, timedelta
-import os
 
 import logging
+from smartflight.config import settings
 logger = logging.getLogger(__name__)
 
 # 结构化LLM输出的提取结果
@@ -23,7 +23,8 @@ class FlightQueryExtraction(BaseModel):
 
 
 def extract_query_node(state: AgentState) -> AgentState:
-    client = OpenAI() if os.environ.get("OPENAI_API_KEY") else None
+    api_key = settings.openai_api_key
+    client = OpenAI(api_key=api_key) if api_key else None
     if not client:
         raise ValueError("OPENAI_API_KEY not set")
         

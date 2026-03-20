@@ -22,5 +22,6 @@
   "portsAttributes": {
     "8000": { "label": "Backend API" },
     "5173": { "label": "Frontend" }
-  }
+  },
+  "runArgs": ["--env-file", "${localWorkspaceFolder}/backend/.env"]
 }

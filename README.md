@@ -26,6 +26,7 @@
 ```bash
 # Backend
 cd backend
+cp .env.example .env
 pip install -r requirements.txt
 pip install -e .
 uvicorn smartflight.main:app --reload --port 8000
@@ -35,6 +36,28 @@ cd frontend
 npm install
 npm run dev
 ```
+
+### Environment Variables
+
+Backend-only secrets should stay in the backend runtime environment.
+
+- `backend/.env.example` documents the expected variables.
+- `OPENAI_API_KEY` must be set for the backend if you want OpenAI-backed extraction enabled.
+- Do not put `OPENAI_API_KEY` in the frontend. Frontend `VITE_*` variables are exposed to the browser.
+
+Example Docker Compose pattern for the backend service:
+
+```yaml
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+```
+
+In production, inject `OPENAI_API_KEY` from the server or deployment platform's secret store at container runtime instead of baking it into the image.
 
 ### Tests
 
