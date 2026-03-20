@@ -9,6 +9,10 @@ export interface FlightOption {
   stops: string
 }
 
+export interface ChatRequest {
+  message: string
+}
+
 export interface ChatResponse {
   reply: string
   flights: FlightOption[] | null

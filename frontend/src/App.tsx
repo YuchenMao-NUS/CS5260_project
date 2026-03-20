@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { ChatMessage } from './components/ChatMessage'
 import './App.css'
-import type { ChatResponse, FlightOption } from './types'
-
-const API_BASE = import.meta.env.VITE_API_URL || ''
+import type { FlightOption } from './types'
+import { sendChatMessage } from './api'
 
 export default function App() {
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; flights?: FlightOption[] }>>([])
@@ -32,13 +31,7 @@ export default function App() {
     setLoading(true)
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
-      })
-      if (!res.ok) throw new Error(await res.text())
-      const data: ChatResponse = await res.json()
+      const data = await sendChatMessage({ message: text })
       setMessages((prev) => [
         ...prev,
         {

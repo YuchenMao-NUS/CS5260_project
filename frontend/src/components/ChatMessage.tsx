@@ -5,7 +5,7 @@ interface ChatMessageProps {
   role: 'user' | 'assistant'
   content: string
   flights?: FlightOption[]
-  filtersRef?: React.RefObject<HTMLDivElement | null>
+  filtersRef?: React.Ref<HTMLDivElement>
 }
 
 export function ChatMessage({ role, content, flights, filtersRef }: ChatMessageProps) {
