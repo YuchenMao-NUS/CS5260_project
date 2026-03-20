@@ -2,7 +2,8 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from smartflight.services.nlu import parse_flight_intent
+from smartflight.services.chat_formatting import format_demo_flight, format_graph_flight
+from smartflight.services.nlu import run_flight_search
 from smartflight.services.flight_search import get_flights, is_demo_trigger
 
 router = APIRouter()
@@ -38,32 +39,36 @@ class ChatResponse(BaseModel):
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Process user message: parse intent, return response.
-    Flight search and API integration will be added in a later phase.
+    Process user message, run the flight agent pipeline, and return matching flights.
     """
     try:
-        intent = parse_flight_intent(request.message)
-        use_demo = is_demo_trigger(request.message)
-        flights = get_flights(intent, use_demo=use_demo)
+        result = run_flight_search(request.message)
+        intent = {
+            "flight_query": result.get("flight_query"),
+            "flight_preference": result.get("flight_preference"),
+            "error_message": result.get("error_message"),
+        }
 
-        if flights:
-            reply = f"Found {len(flights)} flight option(s). See details below."
+        use_demo = is_demo_trigger(request.message)
+        graph_flights = result.get("flight_choices") or []
+
+        if graph_flights:
+            reply = f"Found {len(graph_flights)} flight option(s). See details below."
             flight_options = [
-                FlightOption(
-                    id=f["id"],
-                    airlineCode=f["airlineCode"],
-                    departure=f["departure"],
-                    arrival=f["arrival"],
-                    duration=f["duration"],
-                    duration_minutes=f["duration_minutes"],
-                    price=f["price"],
-                    stops=f["stops"],
-                )
-                for f in flights
+                FlightOption(**format_graph_flight(choice, idx))
+                for idx, choice in enumerate(graph_flights, start=1)
             ]
         else:
-            reply = "Intent parsed. Flight search and API integration will be added in a later phase."
-            flight_options = None
+            demo_flights = get_flights(intent, use_demo=use_demo)
+            if demo_flights:
+                reply = f"Found {len(demo_flights)} flight option(s). See details below."
+                flight_options = [FlightOption(**format_demo_flight(flight)) for flight in demo_flights]
+            elif intent["error_message"]:
+                reply = intent["error_message"]
+                flight_options = None
+            else:
+                reply = "No matching flights were found for your request."
+                flight_options = None
 
         return ChatResponse(
             reply=reply,
