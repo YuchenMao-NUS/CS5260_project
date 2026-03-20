@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { FlightCard } from './FlightCard'
 import type { FlightOption } from '../types'
-import { getAirline } from 'soaring-symbols'
+import { getAirlineInfo } from '../utils/airlines'
 
 export type StopsFilter = 'all' | 'direct' | '1' | '2+'
 export type SortOption = 'price-low' | 'price-high' | 'duration'
@@ -29,8 +29,8 @@ export function FlightFilters({ flights, content }: FlightFiltersProps) {
   const airlines = useMemo(() => {
     const set = new Set(flights.map((f) => f.airlineCode))
     return Array.from(set).sort((a, b) => {
-      const nameA = getAirline(a)?.name || a
-      const nameB = getAirline(b)?.name || b
+      const nameA = getAirlineInfo(a).name
+      const nameB = getAirlineInfo(b).name
       return nameA.localeCompare(nameB)
     })
   }, [flights])
@@ -55,8 +55,7 @@ export function FlightFilters({ flights, content }: FlightFiltersProps) {
     return result
   }, [flights, stopsFilter, airlinesFilter, sortBy])
 
-  // Reset page when filters change
-  useMemo(() => {
+  useEffect(() => {
     setCurrentPage(1)
   }, [stopsFilter, airlinesFilter, sortBy])
 
@@ -120,7 +119,7 @@ export function FlightFilters({ flights, content }: FlightFiltersProps) {
                     All
                   </button>
             {airlines.map((code) => {
-              const name = getAirline(code)?.name || code
+              const name = getAirlineInfo(code).name
               return (
                 <label key={code} className="filter-chip filter-chip-check">
                   <input

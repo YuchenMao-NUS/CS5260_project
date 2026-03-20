@@ -1,13 +1,12 @@
 import type { FlightOption } from '../types'
-import { getAirline } from 'soaring-symbols'
+import { getAirlineInfo } from '../utils/airlines'
 
 interface FlightCardProps {
   flight: FlightOption
 }
 
 export function FlightCard({ flight }: FlightCardProps) {
-  // Find the airline slug from soaring-symbols using the official API
-  const airlineMeta = getAirline(flight.airlineCode)
+  const airlineMeta = getAirlineInfo(flight.airlineCode)
   const slug = airlineMeta?.slug
   const airlineName = airlineMeta?.name || flight.airlineCode
   
@@ -27,16 +26,16 @@ export function FlightCard({ flight }: FlightCardProps) {
                 alt={`${airlineName} logo`} 
                 className="airline-logo"
                 onError={(e) => {
-                  const target = e.currentTarget;
+                  const target = e.currentTarget
                   // If icon fails, try logo.svg
                   if (target.src.endsWith('icon.svg') && logoUrl) {
-                    target.src = logoUrl;
+                    target.src = logoUrl
                   } else {
                     // If both fail, hide image and show placeholder
-                    target.style.display = 'none';
-                    const placeholder = target.parentElement?.querySelector('.airline-logo-placeholder') as HTMLElement;
+                    target.style.display = 'none'
+                    const placeholder = target.parentElement?.querySelector('.airline-logo-placeholder') as HTMLElement
                     if (placeholder) {
-                      placeholder.style.display = 'flex';
+                      placeholder.style.display = 'flex'
                     }
                   }
                 }}
