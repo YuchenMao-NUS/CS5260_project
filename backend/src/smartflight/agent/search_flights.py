@@ -1,5 +1,10 @@
 from smartflight.agent.state import *
-from fast_flights import FlightQuery as FlightQuery, Passengers, create_query, get_flights
+from smartflight.agent.fast_flights import (
+    FlightQuery as FlightQuery,
+    Passengers,
+    create_query,
+    get_flights,
+)
 
 import logging
 logger = logging.getLogger(__name__)

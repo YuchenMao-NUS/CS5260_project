@@ -1,5 +1,6 @@
 from typing import TypedDict, Optional, List, Literal
-from fast_flights.model import SingleFlight
+
+from smartflight.agent.fast_flights.model import SingleFlight
 
 class FlightQuery(TypedDict):
     trip: Literal["one_way", "round_trip"]
