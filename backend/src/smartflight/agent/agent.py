@@ -74,7 +74,7 @@ graph = builder.compile()
 # 测试
 if __name__ == "__main__":
     test_input = {
-        "user_input": "我想从北京出发去东京，下周五出发，一周后返回，希望直飞，预算30000元以内",
+        "user_input": "我想从北京出发去东京，下个月出发，一周后返回，预算30000元以内",
         "flight_query": None,
         "flight_preference": None,
         "error_message": None,

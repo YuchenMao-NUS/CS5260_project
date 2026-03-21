@@ -1,0 +1,120 @@
+[
+    Flights(
+        type="CX",
+        price=250,
+        airlines=["Cathay Pacific"],
+        flights=[
+            SingleFlight(
+                from_airport=Airport(
+                    name="Beijing Capital International Airport", code="PEK"
+                ),
+                to_airport=Airport(name="Hong Kong International Airport", code="HKG"),
+                departure=SimpleDatetime(date=[2026, 4, 21], time=[10]),
+                arrival=SimpleDatetime(date=[2026, 4, 21], time=[13, 45]),
+                duration=225,
+                plane_type="Airbus A330",
+                flight_number="CX347",
+                flight_number_airline_code="CX",
+                flight_number_numeric="347",
+                flight_number_airline_name="Cathay Pacific",
+            ),
+            SingleFlight(
+                from_airport=Airport(
+                    name="Hong Kong International Airport", code="HKG"
+                ),
+                to_airport=Airport(name="Haneda Airport", code="HND"),
+                departure=SimpleDatetime(date=[2026, 4, 21], time=[16, 20]),
+                arrival=SimpleDatetime(date=[2026, 4, 21], time=[21, 35]),
+                duration=255,
+                plane_type="Boeing 777",
+                flight_number="CX542",
+                flight_number_airline_code="CX",
+                flight_number_numeric="542",
+                flight_number_airline_name="Cathay Pacific",
+            ),
+        ],
+        carbon=CarbonEmission(typical_on_route=231000, emission=344000),
+        tfu_token="CjRIRXU0R2VzWlFib2NBRkhjU1FCRy0tLS0tLS0tLXNtbmwxOEFBQUFBR20tUEtNSlhyZEtBEgtDWDM0N3xDWDU0MhoLCKHDARACGgNTR0Q4HXCgmAE=",
+    ),
+    Flights(
+        type="OZ",
+        price=289,
+        airlines=["Asiana Airlines"],
+        flights=[
+            SingleFlight(
+                from_airport=Airport(
+                    name="Beijing Capital International Airport", code="PEK"
+                ),
+                to_airport=Airport(name="Incheon International Airport", code="ICN"),
+                departure=SimpleDatetime(date=[2026, 4, 21], time=[16, 50]),
+                arrival=SimpleDatetime(date=[2026, 4, 21], time=[20, 5]),
+                duration=135,
+                plane_type="Airbus A321neo",
+                flight_number="OZ336",
+                flight_number_airline_code="OZ",
+                flight_number_numeric="336",
+                flight_number_airline_name="Asiana Airlines",
+            ),
+            SingleFlight(
+                from_airport=Airport(name="Incheon International Airport", code="ICN"),
+                to_airport=Airport(name="Haneda Airport", code="HND"),
+                departure=SimpleDatetime(date=[2026, 4, 21], time=[21, 10]),
+                arrival=SimpleDatetime(date=[2026, 4, 21], time=[23, 30]),
+                duration=140,
+                plane_type="Airbus A330",
+                flight_number="OZ178",
+                flight_number_airline_code="OZ",
+                flight_number_numeric="178",
+                flight_number_airline_name="Asiana Airlines",
+            ),
+        ],
+        carbon=CarbonEmission(typical_on_route=231000, emission=196000),
+        tfu_token="CjRIRXU0R2VzWlFib2NBRkhjU1FCRy0tLS0tLS0tLXNtbmwxOEFBQUFBR20tUEtNSlhyZEtBEgtPWjMzNnxPWjE3OBoLCMPhARACGgNTR0Q4HXDsrwE=",
+    ),
+    Flights(
+        type="NH",
+        price=390,
+        airlines=["ANA"],
+        flights=[
+            SingleFlight(
+                from_airport=Airport(
+                    name="Beijing Capital International Airport", code="PEK"
+                ),
+                to_airport=Airport(name="Haneda Airport", code="HND"),
+                departure=SimpleDatetime(date=[2026, 4, 21], time=[15, 10]),
+                arrival=SimpleDatetime(date=[2026, 4, 21], time=[19, 35]),
+                duration=205,
+                plane_type="Boeing 777",
+                flight_number="NH962",
+                flight_number_airline_code="NH",
+                flight_number_numeric="962",
+                flight_number_airline_name="ANA",
+            )
+        ],
+        carbon=CarbonEmission(typical_on_route=231000, emission=248000),
+        tfu_token="CjRIRXU0R2VzWlFib2NBRkhjU1FCRy0tLS0tLS0tLXNtbmwxOEFBQUFBR20tUEtNSlhyZEtBEgVOSDk2MhoLCJ6wAhACGgNTR0Q4HXCc7QE=",
+    ),
+    Flights(
+        type="NH",
+        price=436,
+        airlines=["ANA"],
+        flights=[
+            SingleFlight(
+                from_airport=Airport(
+                    name="Beijing Capital International Airport", code="PEK"
+                ),
+                to_airport=Airport(name="Haneda Airport", code="HND"),
+                departure=SimpleDatetime(date=[2026, 4, 21], time=[8, 20]),
+                arrival=SimpleDatetime(date=[2026, 4, 21], time=[12, 55]),
+                duration=215,
+                plane_type="Boeing 767",
+                flight_number="NH964",
+                flight_number_airline_code="NH",
+                flight_number_numeric="964",
+                flight_number_airline_name="ANA",
+            )
+        ],
+        carbon=CarbonEmission(typical_on_route=231000, emission=215000),
+        tfu_token="CjRIRXU0R2VzWlFib2NBRkhjU1FCRy0tLS0tLS0tLXNtbmwxOEFBQUFBR20tUEtNSlhyZEtBEgVOSDk2NBoLCM7UAhACGgNTR0Q4HXDLiQI=",
+    ),
+]

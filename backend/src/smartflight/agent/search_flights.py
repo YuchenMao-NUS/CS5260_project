@@ -413,27 +413,7 @@ if __name__ == "__main__":
     query = create_query(
         flights=[
             FlightQuery(
-                date="2026-03-27",
-                from_airport="PEK",
-                to_airport="NRT",
-            )
-        ],
-        seat="economy",
-        trip="one-way",
-        passengers=Passengers(adults=1),
-        language="en-US",
-        currency="SGD",
-    )
-
-    results = get_flights(query)
-    print(results)
-    
-    print("\n\n")
-    
-    query = create_query(
-        flights=[
-            FlightQuery(
-                date="2026-03-27",
+                date="2026-04-21",
                 from_airport="PEK",
                 to_airport="HND",
             )
