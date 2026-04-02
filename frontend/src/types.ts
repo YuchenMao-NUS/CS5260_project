@@ -1,12 +1,17 @@
-export interface FlightOption {
-  id: string
+export interface FlightLeg {
   airlineCode: string
   departure: string
   arrival: string
   duration: string
   duration_minutes: number
-  price: number
   stops: string
+}
+
+export interface FlightOption {
+  id: string
+  price: number
+  tripType: string
+  legs: FlightLeg[]
 }
 
 export interface ChatRequest {

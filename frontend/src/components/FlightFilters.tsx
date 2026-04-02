@@ -27,7 +27,7 @@ export function FlightFilters({ flights, content }: FlightFiltersProps) {
   const itemsPerPage = 10
 
   const airlines = useMemo(() => {
-    const set = new Set(flights.map((f) => f.airlineCode))
+    const set = new Set(flights.flatMap((f) => f.legs.map((l) => l.airlineCode)))
     return Array.from(set).sort((a, b) => {
       const nameA = getAirlineInfo(a).name
       const nameB = getAirlineInfo(b).name
@@ -37,19 +37,28 @@ export function FlightFilters({ flights, content }: FlightFiltersProps) {
 
   const filteredAndSorted = useMemo(() => {
     let result = flights.filter((f) => {
-      const stops = getStopsCount(f.stops)
-      if (stopsFilter === 'direct' && stops !== 0) return false
-      if (stopsFilter === '1' && stops !== 1) return false
-      if (stopsFilter === '2+' && stops < 2) return false
+      // If any leg doesn't meet the stop criteria, filter out the flight
+      const maxStops = Math.max(...f.legs.map(l => getStopsCount(l.stops)))
+      if (stopsFilter === 'direct' && maxStops !== 0) return false
+      if (stopsFilter === '1' && maxStops !== 1) return false
+      if (stopsFilter === '2+' && maxStops < 2) return false
 
-      if (airlinesFilter.size > 0 && !airlinesFilter.has(f.airlineCode)) return false
+      if (airlinesFilter.size > 0) {
+        // Must contain at least one of the selected airlines
+        const flightAirlines = new Set(f.legs.map(l => l.airlineCode))
+        const hasMatchingAirline = Array.from(flightAirlines).some(code => airlinesFilter.has(code))
+        if (!hasMatchingAirline) return false
+      }
+      
       return true
     })
 
     result = [...result].sort((a, b) => {
       if (sortBy === 'price-low') return a.price - b.price
       if (sortBy === 'price-high') return b.price - a.price
-      return a.duration_minutes - b.duration_minutes
+      const durationA = a.legs.reduce((acc, leg) => acc + leg.duration_minutes, 0)
+      const durationB = b.legs.reduce((acc, leg) => acc + leg.duration_minutes, 0)
+      return durationA - durationB
     })
 
     return result

@@ -15,17 +15,23 @@ class ChatRequest(BaseModel):
     message: str
 
 
-class FlightOption(BaseModel):
-    """Flight option for response."""
-
-    id: str
+class FlightLeg(BaseModel):
+    """A single leg of a journey (e.g. Outbound or Inbound)."""
     airlineCode: str
     departure: str
     arrival: str
     duration: str
     duration_minutes: int
-    price: float
     stops: str
+
+
+class FlightOption(BaseModel):
+    """Flight option for response, containing one or more legs."""
+
+    id: str
+    price: float
+    tripType: str
+    legs: list[FlightLeg]
 
 
 class ChatResponse(BaseModel):

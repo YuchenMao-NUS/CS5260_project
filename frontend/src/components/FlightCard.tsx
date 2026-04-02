@@ -1,14 +1,14 @@
-import type { FlightOption } from '../types'
+import type { FlightOption, FlightLeg } from '../types'
 import { getAirlineInfo } from '../utils/airlines'
 
 interface FlightCardProps {
   flight: FlightOption
 }
 
-export function FlightCard({ flight }: FlightCardProps) {
-  const airlineMeta = getAirlineInfo(flight.airlineCode)
+function FlightLegView({ leg, label }: { leg: FlightLeg, label?: string }) {
+  const airlineMeta = getAirlineInfo(leg.airlineCode)
   const slug = airlineMeta?.slug
-  const airlineName = airlineMeta?.name || flight.airlineCode
+  const airlineName = airlineMeta?.name || leg.airlineCode
   
   // Try icon first, fallback to logo if icon doesn't exist
   // We'll let the img onError handler deal with actual 404s
@@ -16,7 +16,8 @@ export function FlightCard({ flight }: FlightCardProps) {
   const logoUrl = slug ? `/airlines/${slug}/logo.svg` : null
 
   return (
-    <div className="flight-card">
+    <div className="flight-leg">
+      {label && <div className="leg-direction-label">{label}</div>}
       <div className="flight-header">
         <div className="airline-info">
           <div className="airline-logo-container">
@@ -50,14 +51,48 @@ export function FlightCard({ flight }: FlightCardProps) {
           </div>
           <span className="airline">{airlineName}</span>
         </div>
-        <span className="price">SGD {flight.price}</span>
       </div>
       <div className="flight-details">
-        <span>{flight.departure}</span>
-        <span className="duration">{flight.duration}</span>
-        <span>{flight.arrival}</span>
+        <span>{leg.departure}</span>
+        <div className="duration-container">
+          <span className="duration">{leg.duration}</span>
+          <span className={`flight-stops ${leg.stops === 'Direct' ? 'direct' : ''}`}>{leg.stops}</span>
+        </div>
+        <span>{leg.arrival}</span>
       </div>
-      <div className="flight-stops">{flight.stops}</div>
+    </div>
+  )
+}
+
+export function FlightCard({ flight }: FlightCardProps) {
+  const getTripTypeLabel = (type: string) => {
+    if (type === 'round_trip') return 'Round Trip'
+    if (type === 'multi_city') return 'Multi-City'
+    return 'One Way'
+  }
+
+  return (
+    <div className="flight-card">
+      <div className="flight-card-header">
+        <span className="trip-type-badge">{getTripTypeLabel(flight.tripType)}</span>
+        <span className="price">SGD {flight.price}</span>
+      </div>
+      <div className="flight-legs">
+        {flight.legs.map((leg, index) => {
+          let label = undefined;
+          if (flight.tripType === 'round_trip' && flight.legs.length === 2) {
+            label = index === 0 ? '🛫 Outbound' : '🛬 Return';
+          } else if (flight.tripType === 'multi_city' || flight.legs.length > 1) {
+            label = `✈️ Leg ${index + 1}`;
+          }
+          return (
+            <div key={index} className="flight-leg-container">
+              {index > 0 && <div className="leg-divider"></div>}
+              <FlightLegView leg={leg} label={label} />
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
