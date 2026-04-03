@@ -19,6 +19,11 @@ export interface ChatRequest {
   message: string
 }
 
+export interface FilterTag {
+  id: string
+  label: string
+}
+
 export interface ChatResponse {
   reply: string
   flights: FlightOption[] | null

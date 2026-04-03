@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FlightCard } from './FlightCard'
-import type { FlightOption } from '../types'
+import type { FlightOption, FilterTag } from '../types'
 import { getAirlineInfo } from '../utils/airlines'
 
 export type StopsFilter = 'all' | 'direct' | '1' | '2+'
@@ -9,6 +9,7 @@ export type SortOption = 'price-low' | 'price-high' | 'duration'
 interface FlightFiltersProps {
   flights: FlightOption[]
   content?: string
+  onToggleTag?: (tag: FilterTag, isActive: boolean) => void
 }
 
 function getStopsCount(stops: string): number {
@@ -17,11 +18,44 @@ function getStopsCount(stops: string): number {
   return m ? parseInt(m[1], 10) : 1
 }
 
-export function FlightFilters({ flights, content }: FlightFiltersProps) {
+export function FlightFilters({ flights, content, onToggleTag }: FlightFiltersProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [stopsFilter, setStopsFilter] = useState<StopsFilter>('all')
   const [airlinesFilter, setAirlinesFilter] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<SortOption>('price-low')
+
+  const setStopsFilterWithTag = (v: StopsFilter) => {
+    setStopsFilter(v)
+    if (v === 'all') {
+      onToggleTag?.({ id: 'stops', label: '' }, false)
+    } else {
+      const label = v === 'direct' ? 'Direct flights only' : v === '1' ? 'Max 1 stop' : '2+ stops'
+      onToggleTag?.({ id: 'stops', label }, true)
+    }
+  }
+
+  const toggleAirlineWithTag = (code: string) => {
+    setAirlinesFilter((prev) => {
+      const next = new Set(prev)
+      const airlineName = getAirlineInfo(code).name
+      if (next.has(code)) {
+        next.delete(code)
+        onToggleTag?.({ id: `airline-${code}`, label: airlineName }, false)
+      } else {
+        next.add(code)
+        onToggleTag?.({ id: `airline-${code}`, label: airlineName }, true)
+      }
+      return next
+    })
+  }
+
+  const clearAirlinesFilterWithTag = () => {
+    airlinesFilter.forEach((code) => {
+      const airlineName = getAirlineInfo(code).name
+      onToggleTag?.({ id: `airline-${code}`, label: airlineName }, false)
+    })
+    setAirlinesFilter(new Set())
+  }
 
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 10
@@ -108,7 +142,7 @@ export function FlightFilters({ flights, content }: FlightFiltersProps) {
                       key={v}
                       type="button"
                       className={`filter-chip ${stopsFilter === v ? 'active' : ''}`}
-                      onClick={() => setStopsFilter(v)}
+                      onClick={() => setStopsFilterWithTag(v)}
                     >
                       {v === 'all' ? 'All' : v === 'direct' ? 'Direct' : v === '1' ? '1 stop' : '2+ stops'}
                     </button>
@@ -123,7 +157,7 @@ export function FlightFilters({ flights, content }: FlightFiltersProps) {
                   <button
                     type="button"
                     className={`filter-chip ${airlinesFilter.size === 0 ? 'active' : ''}`}
-                    onClick={() => setAirlinesFilter(new Set())}
+                    onClick={clearAirlinesFilterWithTag}
                   >
                     All
                   </button>
@@ -134,7 +168,7 @@ export function FlightFilters({ flights, content }: FlightFiltersProps) {
                   <input
                     type="checkbox"
                     checked={airlinesFilter.has(code)}
-                    onChange={() => toggleAirline(code)}
+                    onChange={() => toggleAirlineWithTag(code)}
                   />
                   <span>{name}</span>
                 </label>
