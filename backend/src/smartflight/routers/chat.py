@@ -32,6 +32,7 @@ class FlightOption(BaseModel):
     price: float
     tripType: str
     legs: list[FlightLeg]
+    bookingUrl: str | None = None
 
 
 class ChatResponse(BaseModel):

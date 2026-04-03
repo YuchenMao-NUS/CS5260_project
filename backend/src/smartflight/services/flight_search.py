@@ -16,6 +16,7 @@ def _mock_flights(intent: dict) -> list[dict]:
         {
             "id": "demo-1",
             "price": 420.0,
+            "bookingUrl": "https://www.singaporeair.com",
             "legs": [{
                 "airlineCode": "SQ",
                 "departure": f"{origin} 08:00",
@@ -196,6 +197,7 @@ def _mock_flights(intent: dict) -> list[dict]:
         {
             "id": "demo-16",
             "price": 850.0,
+            "bookingUrl": "https://www.singaporeair.com",
             "legs": [
                 {
                     "airlineCode": "SQ",

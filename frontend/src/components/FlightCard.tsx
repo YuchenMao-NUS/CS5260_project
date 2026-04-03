@@ -1,5 +1,6 @@
 import type { FlightOption, FlightLeg } from '../types'
 import { getAirlineInfo } from '../utils/airlines'
+import { ExternalLinkIcon } from './Icons'
 
 interface FlightCardProps {
   flight: FlightOption
@@ -71,11 +72,26 @@ export function FlightCard({ flight }: FlightCardProps) {
     return 'One Way'
   }
 
+  const handleBookClick = () => {
+    if (flight.bookingUrl) {
+      window.open(flight.bookingUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      // Provide a generic fallback for demo if bookingUrl is missing
+      window.open('https://www.google.com/travel/flights', '_blank', 'noopener,noreferrer');
+    }
+  }
+
   return (
     <div className="flight-card">
       <div className="flight-card-header">
         <span className="trip-type-badge">{getTripTypeLabel(flight.tripType)}</span>
-        <span className="price">SGD {flight.price}</span>
+        <div className="flight-price-action">
+          <span className="price">SGD {flight.price}</span>
+          <button className="book-btn" onClick={handleBookClick} title="Book on external website">
+            <span>Book</span>
+            <ExternalLinkIcon className="external-icon" />
+          </button>
+        </div>
       </div>
       <div className="flight-legs">
         {flight.legs.map((leg, index) => {

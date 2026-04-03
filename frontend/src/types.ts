@@ -12,6 +12,7 @@ export interface FlightOption {
   price: number
   tripType: string
   legs: FlightLeg[]
+  bookingUrl?: string
 }
 
 export interface ChatRequest {

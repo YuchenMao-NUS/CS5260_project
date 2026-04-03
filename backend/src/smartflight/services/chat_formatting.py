@@ -84,8 +84,8 @@ def format_graph_flight(choice: dict, index: int) -> dict:
         "price": float(choice.get("price") or 0.0),
         "tripType": trip_type,
         "legs": legs,
+        "bookingUrl": choice.get("booking_token")  # or bookingUrl depending on what API returns
     }
-
 
 def format_demo_flight(flight: dict) -> dict:
     """Normalize a demo flight into the API response shape."""
@@ -99,4 +99,5 @@ def format_demo_flight(flight: dict) -> dict:
         "price": flight["price"],
         "tripType": trip_type,
         "legs": legs,
+        "bookingUrl": flight.get("bookingUrl")
     }

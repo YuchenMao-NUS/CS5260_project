@@ -276,6 +276,36 @@
   align-items: center;
 }
 
+.flight-price-action {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.book-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  background-color: #059669;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.book-btn:hover {
+  background-color: #047857;
+}
+
+.external-icon {
+  width: 14px;
+  height: 14px;
+}
+
 .trip-type-badge {
   font-size: 0.75rem;
   font-weight: 700;
