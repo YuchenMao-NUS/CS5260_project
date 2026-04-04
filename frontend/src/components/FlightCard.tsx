@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import type { FlightOption, FlightLeg } from '../types'
 import { getAirlineInfo } from '../utils/airlines'
 import { ExternalLinkIcon } from './Icons'
@@ -11,10 +12,26 @@ function FlightLegView({ leg, label }: { leg: FlightLeg, label?: string }) {
   const slug = airlineMeta?.slug
   const airlineName = airlineMeta?.name || leg.airlineCode
   
-  // Try icon first, fallback to logo if icon doesn't exist
-  // We'll let the img onError handler deal with actual 404s
   const iconUrl = slug ? `/airlines/${slug}/icon.svg` : null
   const logoUrl = slug ? `/airlines/${slug}/logo.svg` : null
+
+  const [imgState, setImgState] = useState<'icon' | 'logo' | 'error'>(
+    iconUrl ? 'icon' : (logoUrl ? 'logo' : 'error')
+  )
+
+  useEffect(() => {
+    setImgState(iconUrl ? 'icon' : (logoUrl ? 'logo' : 'error'))
+  }, [iconUrl, logoUrl])
+
+  const currentSrc = imgState === 'icon' ? iconUrl : (imgState === 'logo' ? logoUrl : null)
+
+  const handleError = () => {
+    if (imgState === 'icon' && logoUrl) {
+      setImgState('logo')
+    } else {
+      setImgState('error')
+    }
+  }
 
   return (
     <div className="flight-leg">
@@ -22,30 +39,17 @@ function FlightLegView({ leg, label }: { leg: FlightLeg, label?: string }) {
       <div className="flight-header">
         <div className="airline-info">
           <div className="airline-logo-container">
-            {iconUrl ? (
+            {currentSrc && imgState !== 'error' ? (
               <img 
-                src={iconUrl} 
+                src={currentSrc} 
                 alt={`${airlineName} logo`} 
                 className="airline-logo"
-                onError={(e) => {
-                  const target = e.currentTarget
-                  // If icon fails, try logo.svg
-                  if (target.src.endsWith('icon.svg') && logoUrl) {
-                    target.src = logoUrl
-                  } else {
-                    // If both fail, hide image and show placeholder
-                    target.style.display = 'none'
-                    const placeholder = target.parentElement?.querySelector('.airline-logo-placeholder') as HTMLElement
-                    if (placeholder) {
-                      placeholder.style.display = 'flex'
-                    }
-                  }
-                }}
+                onError={handleError}
               />
             ) : null}
             <div 
               className="airline-logo-placeholder" 
-              style={{ display: iconUrl ? 'none' : 'flex' }}
+              style={{ display: imgState === 'error' ? 'flex' : 'none' }}
             >
               {airlineName.charAt(0).toUpperCase()}
             </div>

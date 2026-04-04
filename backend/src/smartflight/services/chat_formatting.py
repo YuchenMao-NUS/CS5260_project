@@ -2,14 +2,19 @@
 
 
 def _format_datetime(value) -> str:
-    date_value = getattr(value, "date", None) or ()
-    time_value = getattr(value, "time", None) or ()
+    if isinstance(value, dict):
+        date_value = value.get("date", ())
+        time_value = value.get("time", ())
+    else:
+        date_value = getattr(value, "date", None) or ()
+        time_value = getattr(value, "time", None) or ()
 
-    if len(date_value) != 3 or len(time_value) != 2:
+    if len(date_value) != 3 or len(time_value) == 0:
         return "Unknown time"
 
     year, month, day = date_value
-    hour, minute = time_value
+    hour = time_value[0]
+    minute = time_value[1] if len(time_value) > 1 else 0
 
     if None in (year, month, day, hour, minute):
         return "Unknown time"
@@ -31,10 +36,26 @@ def _process_flight_segments(segments: list, airlines_list: list, duration: int)
     last_leg = segments[-1]
     stops_count = max(len(segments) - 1, 0)
     stops = "Direct" if stops_count == 0 else f"{stops_count} stop" + ("s" if stops_count > 1 else "")
-    departure_airport = getattr(getattr(first_leg, "from_airport", None), "code", None) or "UNK"
-    arrival_airport = getattr(getattr(last_leg, "to_airport", None), "code", None) or "UNK"
+    departure_airport = getattr(getattr(first_leg, "from_airport", None), "code", None)
+    if not departure_airport and isinstance(first_leg, dict):
+        departure_airport = first_leg.get("from_airport", {}).get("code") if isinstance(first_leg.get("from_airport"), dict) else None
+    departure_airport = departure_airport or "UNK"
+
+    arrival_airport = getattr(getattr(last_leg, "to_airport", None), "code", None)
+    if not arrival_airport and isinstance(last_leg, dict):
+        arrival_airport = last_leg.get("to_airport", {}).get("code") if isinstance(last_leg.get("to_airport"), dict) else None
+    arrival_airport = arrival_airport or "UNK"
+
     total_duration = int(duration or 0)
-    airline_code = (airlines_list or ["NA"])[0]
+    
+    # Extract the true 2-letter airline code from the flight leg
+    airline_code = getattr(first_leg, "flight_number_airline_code", None)
+    if not airline_code and isinstance(first_leg, dict):
+        airline_code = first_leg.get("flight_number_airline_code")
+    
+    # Fallback to the airlines list if code is missing
+    if not airline_code:
+        airline_code = (airlines_list or ["NA"])[0]
 
     return {
         "airlineCode": airline_code,

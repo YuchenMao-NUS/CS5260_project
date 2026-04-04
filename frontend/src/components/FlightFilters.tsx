@@ -108,14 +108,6 @@ export function FlightFilters({ flights, content, onToggleTag }: FlightFiltersPr
     currentPage * itemsPerPage
   )
 
-  const toggleAirline = (airline: string) => {
-    setAirlinesFilter((prev) => {
-      const next = new Set(prev)
-      if (next.has(airline)) next.delete(airline)
-      else next.add(airline)
-      return next
-    })
-  }
 
   return (
     <div className="flight-filters-wrapper">

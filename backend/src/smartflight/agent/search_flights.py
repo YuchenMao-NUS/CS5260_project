@@ -7,7 +7,21 @@ from smartflight.agent.fast_flights import (
 )
 
 import logging
+import time
+
 logger = logging.getLogger(__name__)
+
+def _get_flights_with_retry(query, max_retries=3, delay=1.0):
+    for attempt in range(max_retries):
+        try:
+            return get_flights(query)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning("Error fetching flights (attempt %d/%d): %s. Retrying in %ss...", attempt + 1, max_retries, e, delay)
+                time.sleep(delay)
+            else:
+                logger.error("Failed to fetch flights after %d attempts: %s", max_retries, e)
+                raise e
 
 def _get_seat(seat_class: str) -> str:
     seat_map = {
@@ -68,7 +82,7 @@ def search_one_way(flight_query: FlightQuery) -> list[FlightInformation]:
 
             logger.debug("One-way query built for %s -> %s", from_airport, to_airport)
 
-            results = get_flights(query) or []
+            results = _get_flights_with_retry(query) or []
 
             logger.info(
                 "Received %d one-way results for %s -> %s",
@@ -200,7 +214,7 @@ def search_round_trip(flight_query: FlightQuery) -> list[FlightInformation]:
                 to_airport,
             )
 
-            step1_results = get_flights(step1_query) or []
+            step1_results = _get_flights_with_retry(step1_query) or []
 
             logger.info(
                 "Received %d outbound options for round-trip route %s <-> %s",
@@ -275,7 +289,7 @@ def search_round_trip(flight_query: FlightQuery) -> list[FlightInformation]:
                     selected_outbound_flight_number=selected_outbound_flight_number,
                 )
 
-                step2_results = get_flights(step2_query) or []
+                step2_results = _get_flights_with_retry(step2_query) or []
 
                 logger.info(
                     "Received %d inbound options for outbound option #%d on route %s <-> %s",
