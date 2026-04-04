@@ -4,12 +4,13 @@ from smartflight.agent.agent import graph
 from smartflight.config import settings
 
 
-def run_flight_search(message: str) -> dict:
+def run_flight_search(message: str, user_context: dict = None) -> dict:
     """
     Run the full flight agent pipeline and return the graph state.
     """
     input_state = {
         "user_input": message,
+        "user_context": user_context or {},
         "flight_query": None,
         "flight_preference": None,
         "error_message": None,

@@ -8,15 +8,15 @@ from smartflight.config import settings
 logger = logging.getLogger(__name__)
 
 
-# 结构化LLM输出的提取结果
+# Structured model for LLM preference extraction results
 class FlightPreferenceExtraction(BaseModel):
-    """LLM 提取用户偏好的结构化模型"""
-    direct_only: Optional[bool]              # 是否明确要求直飞
-    preferred_airlines: Optional[List[str]]  # 航司二字码列表
-    max_price: Optional[float]               # 价格上限 SGD
-    min_price: Optional[float]               # 价格下限 SGD
-    max_duration: Optional[int]              # 时长上限（分钟）
-    min_duration: Optional[int]              # 时长下限（分钟）
+    """Structured model for LLM preference extraction results."""
+    direct_only: Optional[bool]              # Whether direct flights are explicitly requested
+    preferred_airlines: Optional[List[str]]  # List of 2-letter airline codes
+    max_price: Optional[float]               # Max price SGD
+    min_price: Optional[float]               # Min price SGD
+    max_duration: Optional[int]              # Max duration (minutes)
+    min_duration: Optional[int]              # Min duration (minutes)
 
 
 def extract_preference_node(state: AgentState) -> AgentState:

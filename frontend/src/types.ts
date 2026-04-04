@@ -17,6 +17,10 @@ export interface FlightOption {
 
 export interface ChatRequest {
   message: string
+  context?: {
+    timeZone?: string
+    location?: string
+  }
 }
 
 export interface FilterTag {

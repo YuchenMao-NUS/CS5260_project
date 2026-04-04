@@ -9,6 +9,7 @@ export default function App() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [activeTags, setActiveTags] = useState<FilterTag[]>([])
+  const [userLocation, setUserLocation] = useState<string | undefined>(undefined)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -16,6 +17,19 @@ export default function App() {
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   const scrollToFilters = () => filtersRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   
+  useEffect(() => {
+    // Attempt to silently get rough location (City, Country) from IP for better default origin matching
+    fetch('https://get.geojs.io/v1/ip/geo.json')
+      .then(res => res.json())
+      .then(data => {
+        if (data.city && data.country) {
+          setUserLocation(`${data.city}, ${data.country}`)
+        }
+      })
+      .catch(() => {
+        // Fail silently; we still have timezone as a fallback
+      })
+  }, [])
   useEffect(() => {
     const last = messages[messages.length - 1]
     if (last?.role === 'assistant' && last?.flights?.length) {
@@ -66,7 +80,14 @@ export default function App() {
     setLoading(true)
 
     try {
-      const data = await sendChatMessage({ message: finalMessageText })
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+      const data = await sendChatMessage({ 
+        message: finalMessageText,
+        context: { 
+          timeZone,
+          location: userLocation
+        }
+      })
       setMessages((prev) => [
         ...prev,
         {

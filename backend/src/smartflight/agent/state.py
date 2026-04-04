@@ -4,21 +4,21 @@ from smartflight.agent.fast_flights.model import SingleFlight
 
 class FlightQuery(TypedDict):
     trip: Literal["one_way", "round_trip"]
-    from_airport: str                    # IATA 三字码
-    to_airports: List[str]               # IATA 三字码列表（可能是推荐的5个）
+    from_airport: str                    # IATA 3-letter code
+    to_airports: List[str]               # List of IATA codes (could be 5 recommended)
     departure_date: str                  # YYYY-MM-DD
-    return_date: Optional[str]           # YYYY-MM-DD，仅往返有效
+    return_date: Optional[str]           # YYYY-MM-DD, only valid for round_trip
     seat_classes: Literal["business", "economy", "first", "premium-economy"]
     passengers: int
 
 
 class FlightPreference(TypedDict):
-    direct_only: Optional[bool]               # True=只要直飞，False=无所谓，None=未提及
-    preferred_airlines: Optional[List[str]]   # 航司 IATA 二字码列表，如 ["CA", "MU"]
-    max_price: Optional[float]                # 价格上限（SGD）
-    min_price: Optional[float]                # 价格下限（SDG）
-    max_duration: Optional[int]               # 飞行时长上限（分钟）
-    min_duration: Optional[int]               # 飞行时长下限（分钟）
+    direct_only: Optional[bool]               # True=direct only, False=doesn't matter, None=not mentioned
+    preferred_airlines: Optional[List[str]]   # List of IATA airline codes, e.g. ["CA", "MU"]
+    max_price: Optional[float]                # Max price (SGD)
+    min_price: Optional[float]                # Min price (SDG)
+    max_duration: Optional[int]               # Max flight duration (minutes)
+    min_duration: Optional[int]               # Min flight duration (minutes)
 
 class FlightInformation(TypedDict):
     trip: Literal["one_way", "round_trip"]
@@ -42,8 +42,9 @@ class FlightInformation(TypedDict):
     
 
 class AgentState(TypedDict):
-    user_input: str                                # 用户原始输入
-    flight_query: Optional[FlightQuery]            # 提取出的检索条件
-    flight_preference: Optional[FlightPreference]  # 提取出的用户偏好
-    error_message: Optional[str]                   # 节点错误信息（缺少出发地）
+    user_input: str                                # Original user input
+    user_context: dict                             # Context passed from frontend (e.g. timezone, location)
+    flight_query: Optional[FlightQuery]            # Extracted search parameters
+    flight_preference: Optional[FlightPreference]  # Extracted user preferences
+    error_message: Optional[str]                   # Node error message (e.g. missing origin)
     flight_choices: Optional[List[FlightInformation]]
