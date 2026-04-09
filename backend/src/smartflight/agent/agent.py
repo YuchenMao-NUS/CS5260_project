@@ -5,22 +5,6 @@ from smartflight.agent.state import AgentState
 from smartflight.agent.search_flights import search_flights_node
 from smartflight.agent.filter_flights import filter_flights_node
 
-import logging
-# 普通日志（带时间等）
-logging.basicConfig(
-    level=logging.INFO,  # 改成 DEBUG 可以看更详细日志
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
-# ✅ 专门用于“最终输出”的 logger
-result_logger = logging.getLogger("result")
-result_logger.propagate = False  # ❗关键：不要走 root logger
-
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(message)s"))  # ❗只输出内容
-result_logger.addHandler(handler)
-result_logger.setLevel(logging.INFO)
-
 # 条件路由
 def route_after_extraction(state: AgentState) -> str:
     """有错误（缺出发地）则终止，否则继续提取偏好"""
@@ -82,93 +66,93 @@ if __name__ == "__main__":
 
     result = graph.invoke(test_input)
 
-    result_logger.info("=== flight_query ===")
-    for k, v in result["flight_query"].items():
-        result_logger.info("  %s: %s", k, v)
+    # result_logger.info("=== flight_query ===")
+    # for k, v in result["flight_query"].items():
+    #     result_logger.info("  %s: %s", k, v)
 
-    result_logger.info("\n=== flight_preference ===")
-    for k, v in result["flight_preference"].items():
-        result_logger.info("  %s: %s", k, v)
+    # result_logger.info("\n=== flight_preference ===")
+    # for k, v in result["flight_preference"].items():
+    #     result_logger.info("  %s: %s", k, v)
 
-    if result["error_message"]:
-        result_logger.warning("\n=== error ===\n  %s", result["error_message"])
+    # if result["error_message"]:
+    #     result_logger.warning("\n=== error ===\n  %s", result["error_message"])
 
-    result_logger.info("\n=== flight_choices ===")
+    # result_logger.info("\n=== flight_choices ===")
 
-    flight_choices = result.get("flight_choices") or []
+    # flight_choices = result.get("flight_choices") or []
 
-    if not flight_choices:
-        result_logger.info("  (no results)")
-    else:
-        for i, choice in enumerate(flight_choices[:10], 1):
-            # ===== 基本信息 =====
-            header = (
-                f"\n--- Option {i} ---\n"
-                f"  trip: {choice['trip']}\n"
-                f"  route: {choice['from_airport']} -> {choice['to_airport']}\n"
-                f"  departure_date: {choice['departure_date']}"
-            )
+    # if not flight_choices:
+    #     result_logger.info("  (no results)")
+    # else:
+    #     for i, choice in enumerate(flight_choices[:10], 1):
+    #         # ===== 基本信息 =====
+    #         header = (
+    #             f"\n--- Option {i} ---\n"
+    #             f"  trip: {choice['trip']}\n"
+    #             f"  route: {choice['from_airport']} -> {choice['to_airport']}\n"
+    #             f"  departure_date: {choice['departure_date']}"
+    #         )
 
-            if choice["return_date"]:
-                header += f"\n  return_date: {choice['return_date']}"
+    #         if choice["return_date"]:
+    #             header += f"\n  return_date: {choice['return_date']}"
 
-            result_logger.info(header)
+    #         result_logger.info(header)
 
-            # ===== Outbound =====
-            outbound_info = (
-                "\n  [Outbound]\n"
-                f"    airlines: {choice['airlines']}\n"
-                f"    price: {choice['price']}\n"
-                f"    duration: {choice['duration']} min\n"
-                f"    direct: {choice['is_direct']}"
-            )
-            result_logger.info(outbound_info)
+    #         # ===== Outbound =====
+    #         outbound_info = (
+    #             "\n  [Outbound]\n"
+    #             f"    airlines: {choice['airlines']}\n"
+    #             f"    price: {choice['price']}\n"
+    #             f"    duration: {choice['duration']} min\n"
+    #             f"    direct: {choice['is_direct']}"
+    #         )
+    #         result_logger.info(outbound_info)
 
-            for j, f in enumerate(choice["flights"], 1):
-                result_logger.info(
-                    "    Leg %d:\n"
-                    "      %s -> %s\n"
-                    "      depart: %s %s\n"
-                    "      arrive: %s %s\n"
-                    "      duration: %s min\n"
-                    "      flight_no: %s",
-                    j,
-                    f.from_airport.code,
-                    f.to_airport.code,
-                    f.departure.date,
-                    f.departure.time,
-                    f.arrival.date,
-                    f.arrival.time,
-                    f.duration,
-                    f.flight_number,
-                )
+    #         for j, f in enumerate(choice["flights"], 1):
+    #             result_logger.info(
+    #                 "    Leg %d:\n"
+    #                 "      %s -> %s\n"
+    #                 "      depart: %s %s\n"
+    #                 "      arrive: %s %s\n"
+    #                 "      duration: %s min\n"
+    #                 "      flight_no: %s",
+    #                 j,
+    #                 f.from_airport.code,
+    #                 f.to_airport.code,
+    #                 f.departure.date,
+    #                 f.departure.time,
+    #                 f.arrival.date,
+    #                 f.arrival.time,
+    #                 f.duration,
+    #                 f.flight_number,
+    #             )
 
-            # ===== Inbound =====
-            if choice["trip"] == "round_trip":
-                inbound_info = (
-                    "\n  [Inbound]\n"
-                    f"    airlines: {choice['airlines_2']}\n"
-                    f"    price: {choice['price_2']}\n"
-                    f"    duration: {choice['duration_2']} min\n"
-                    f"    direct: {choice['is_direct_2']}"
-                )
-                result_logger.info(inbound_info)
+    #         # ===== Inbound =====
+    #         if choice["trip"] == "round_trip":
+    #             inbound_info = (
+    #                 "\n  [Inbound]\n"
+    #                 f"    airlines: {choice['airlines_2']}\n"
+    #                 f"    price: {choice['price_2']}\n"
+    #                 f"    duration: {choice['duration_2']} min\n"
+    #                 f"    direct: {choice['is_direct_2']}"
+    #             )
+    #             result_logger.info(inbound_info)
 
-                for j, f in enumerate(choice["flights_2"] or [], 1):
-                    result_logger.info(
-                        "    Leg %d:\n"
-                        "      %s -> %s\n"
-                        "      depart: %s %s\n"
-                        "      arrive: %s %s\n"
-                        "      duration: %s min\n"
-                        "      flight_no: %s",
-                        j,
-                        f.from_airport.code,
-                        f.to_airport.code,
-                        f.departure.date,
-                        f.departure.time,
-                        f.arrival.date,
-                        f.arrival.time,
-                        f.duration,
-                        f.flight_number,
-                    )
+    #             for j, f in enumerate(choice["flights_2"] or [], 1):
+    #                 result_logger.info(
+    #                     "    Leg %d:\n"
+    #                     "      %s -> %s\n"
+    #                     "      depart: %s %s\n"
+    #                     "      arrive: %s %s\n"
+    #                     "      duration: %s min\n"
+    #                     "      flight_no: %s",
+    #                     j,
+    #                     f.from_airport.code,
+    #                     f.to_airport.code,
+    #                     f.departure.date,
+    #                     f.departure.time,
+    #                     f.arrival.date,
+    #                     f.arrival.time,
+    #                     f.duration,
+    #                     f.flight_number,
+    #                 )
