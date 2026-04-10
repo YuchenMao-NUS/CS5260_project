@@ -1,17 +1,17 @@
-from smartflight.agent.state import AgentState
 from typing import List, Literal, Optional
 from openai import OpenAI
 from pydantic import BaseModel
 from datetime import datetime, timedelta
-
-import logging
+from smartflight.agent.state import AgentState
 from smartflight.config import settings
+import logging
+
 logger = logging.getLogger(__name__)
 
-# Structured model for LLM extraction results
+
+
+# Structured LLM output schema
 class FlightQueryExtraction(BaseModel):
-    """Structured model for LLM extraction results."""
-    has_origin: bool                                    # Whether the user provided an origin
     trip: Optional[Literal["one_way", "round_trip"]]    # One-way / Round-trip
     from_airport: Optional[str]                         # Origin IATA code
     to_airports: Optional[List[str]]                    # List of destination IATA codes
@@ -19,6 +19,7 @@ class FlightQueryExtraction(BaseModel):
     return_date: Optional[str]                          # Return date YYYY-MM-DD
     seat_classes: Optional[Literal["business", "economy", "first", "premium-economy"]]
     passengers: Optional[int]
+    is_multi_destination: Optional[bool]                # Boolean values ​​for LLM output
 
 
 
@@ -40,27 +41,36 @@ def extract_query_node(state: AgentState) -> AgentState:
     
     user_loc_str = f"City/Country: {location}" if location else f"Timezone: {tz}"
 
+    # Get incomplete information already extracted in the previous round
+    previous_query = state.get("flight_query")
+    previous_context = f"Previously extracted parameters: {previous_query}" if previous_query else "No previous parameters. This is a new search."
+
     system_prompt = f"""
 You are a flight search assistant. Extract structured flight search parameters from the user's natural language input.
 Today's date is {today}, {weekday}.
 The user's current known location context is: {user_loc_str}.
 
+{previous_context}
+CRITICAL INSTRUCTION: If there are "Previously extracted parameters", the user is likely answering a follow-up question or providing missing information. You MUST merge the new information from the user's current input with the previously extracted parameters. Do not discard previous constraints unless the user explicitly changes them.
+
 Extraction rules:
-1. has_origin: Set to true. If no departure city/airport is explicitly mentioned, implicitly infer the origin airport based on the user's location context.
-2. from_airport: MUST use 3-letter IATA codes. If not explicitly mentioned in the query, deduce the nearest major airport IATA code from their location (e.g. if location is Beijing, use PEK or PKX; if Singapore, use SIN). If location context is completely unhelpful, default to SIN.
-3. to_airports: MUST use 3-letter IATA codes (e.g. PEK, SHA, NRT). If no destination is mentioned, recommend 5 suitable destinations based on the origin.
-4. trip: Infer from context. Keywords like "round trip", "return", "来回" → round_trip; otherwise → one_way.
-5. departure_date: If not mentioned, use today ({today}). Format: YYYY-MM-DD.
-6. return_date: Only set for round_trip. If not mentioned, default to departure_date + 7 days.
-7. seat_classes: If not specified, return "economy".
-8. passengers: If not specified, default to 1.
+1. from_airport: MUST use 3-letter IATA codes. If not explicitly mentioned in the query, deduce the nearest major airport IATA code from their location (e.g. if location is Beijing, use PEK or PKX; if Singapore, use SIN). If location context is completely unhelpful, default to SIN.
+2. to_airports: MUST use 3-letter IATA codes (e.g. PEK, SHA, NRT). If no destination is mentioned, recommend 5 suitable destinations based on the origin.
+3. trip: Infer from context. Keywords like "round trip", "return", "来回" → round_trip; otherwise → one_way.
+4. departure_date: If not mentioned, use today ({today}). Format: YYYY-MM-DD.
+5. return_date: Only set for round_trip. If not mentioned, default to departure_date + 7 days.
+6. seat_classes: If not specified, return "economy".
+7. passengers: If not specified, default to 1.
+8. is_multi_destination:
+   - Set to `true` when the user explicitly wants to visit more than one destination in a single connected trip, or if they are asking for recommendations/options (e.g., "I want to go to Tokyo and Osaka").
+   - Set to `false` if they only want to visit one destination. (e.g., "I want to go to Tokyo").
 """.strip()
     
     logger.debug("[LLM] system_prompt:\n%s", system_prompt)
     logger.debug("[LLM] user_input: %s", user_input)
 
     response = client.beta.chat.completions.parse(
-        model="gpt-5-mini", # gpt-4o-mini is too dumb
+        model="gpt-5-mini",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_input},

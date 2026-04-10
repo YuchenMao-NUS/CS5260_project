@@ -1,22 +1,23 @@
-from smartflight.agent.state import AgentState
 from typing import List, Optional
 from openai import OpenAI
 from pydantic import BaseModel
-
-import logging
+from smartflight.agent.state import AgentState
 from smartflight.config import settings
+import logging
+
 logger = logging.getLogger(__name__)
 
 
-# Structured model for LLM preference extraction results
+
+# Structured LLM output schema
 class FlightPreferenceExtraction(BaseModel):
-    """Structured model for LLM preference extraction results."""
     direct_only: Optional[bool]              # Whether direct flights are explicitly requested
     preferred_airlines: Optional[List[str]]  # List of 2-letter airline codes
     max_price: Optional[float]               # Max price SGD
     min_price: Optional[float]               # Min price SGD
     max_duration: Optional[int]              # Max duration (minutes)
     min_duration: Optional[int]              # Min duration (minutes)
+    
 
 
 def extract_preference_node(state: AgentState) -> AgentState:
@@ -57,7 +58,7 @@ Extraction rules:
     logger.debug("[LLM] user_input: %s", user_input)
 
     response = client.beta.chat.completions.parse(
-        model="gpt-5-mini", # gpt-4o-mini is too dumb
+        model="gpt-5-mini",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_input},

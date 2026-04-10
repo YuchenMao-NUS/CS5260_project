@@ -1,6 +1,7 @@
 from typing import TypedDict, Optional, List, Literal
-
 from smartflight.agent.fast_flights.model import SingleFlight
+
+
 
 class FlightQuery(TypedDict):
     trip: Literal["one_way", "round_trip"]
@@ -10,6 +11,7 @@ class FlightQuery(TypedDict):
     return_date: Optional[str]           # YYYY-MM-DD, only valid for round_trip
     seat_classes: Literal["business", "economy", "first", "premium-economy"]
     passengers: int
+    is_multi_destination: bool           # Determine whether it is a single destination or multiple destinations.
 
 
 class FlightPreference(TypedDict):
@@ -19,6 +21,7 @@ class FlightPreference(TypedDict):
     min_price: Optional[float]                # Min price (SDG)
     max_duration: Optional[int]               # Max flight duration (minutes)
     min_duration: Optional[int]               # Min flight duration (minutes)
+
 
 class FlightInformation(TypedDict):
     trip: Literal["one_way", "round_trip"]
@@ -40,11 +43,10 @@ class FlightInformation(TypedDict):
     flights_2: Optional[list[SingleFlight]]
     
     
-
 class AgentState(TypedDict):
     user_input: str                                # Original user input
     user_context: dict                             # Context passed from frontend (e.g. timezone, location)
     flight_query: Optional[FlightQuery]            # Extracted search parameters
     flight_preference: Optional[FlightPreference]  # Extracted user preferences
-    error_message: Optional[str]                   # Node error message (e.g. missing origin)
     flight_choices: Optional[List[FlightInformation]]
+    error_message: Optional[str]                   # Node error message (e.g. missing origin)
