@@ -1,14 +1,15 @@
 from base64 import b64encode
 from dataclasses import dataclass
 from datetime import datetime as Datetime
-from typing import Literal, Optional, Union
+from urllib.parse import urlencode
+from typing import Literal
 
 from .pb.flights_pb2 import Airport, FlightData, Info, Passenger, Seat, Trip
 from .types import Currency, Language, SeatType, TripType
 
 
 @dataclass
-class SelectedOutbound:
+class SelectedFlight:
     from_airport: str
     date: str
     to_airport: str
@@ -48,7 +49,7 @@ def _wire_str(field_no: int, value: str) -> bytes:
     return bytes([(field_no << 3) | 2]) + _encode_varint(len(payload)) + payload
 
 
-def _encode_selected_outbound_field(s: SelectedOutbound) -> bytes:
+def _encode_selected_flight_field(s: SelectedFlight) -> bytes:
     payload = b"".join(
         [
             _wire_str(1, s.from_airport),
@@ -58,14 +59,15 @@ def _encode_selected_outbound_field(s: SelectedOutbound) -> bytes:
             _wire_str(6, s.flight_number),
         ]
     )
-    # FlightData field #4, length-delimited
     return bytes([(4 << 3) | 2]) + _encode_varint(len(payload)) + payload
 
 
-def _inject_selected_outbound(info_bytes: bytes, selected: SelectedOutbound) -> bytes:
+def _inject_selected_flights(
+    info_bytes: bytes, selected_by_leg: dict[int, list[SelectedFlight]]
+) -> bytes:
     i = 0
     out = bytearray()
-    injected = False
+    flight_data_index = 0
 
     while i < len(info_bytes):
         tag_pos = i
@@ -89,15 +91,17 @@ def _inject_selected_outbound(info_bytes: bytes, selected: SelectedOutbound) -> 
             out.extend(info_bytes[tag_pos:])
             break
 
-        if field_no == 3 and not injected:
+        selected_segments = (
+            selected_by_leg.get(flight_data_index, []) if field_no == 3 else []
+        )
+        if field_no == 3:
             original_flight_data = info_bytes[value_start:value_end]
-            enriched_flight_data = (
-                original_flight_data + _encode_selected_outbound_field(selected)
-            )
+            for selected in selected_segments:
+                original_flight_data += _encode_selected_flight_field(selected)
             out.extend(_encode_varint(tag))
-            out.extend(_encode_varint(len(enriched_flight_data)))
-            out.extend(enriched_flight_data)
-            injected = True
+            out.extend(_encode_varint(len(original_flight_data)))
+            out.extend(original_flight_data)
+            flight_data_index += 1
         else:
             out.extend(info_bytes[tag_pos:value_end])
         i = value_end
@@ -116,7 +120,9 @@ class Query:
     language: str
     currency: str
     tfu: str | None = None
-    selected_outbound: SelectedOutbound | None = None
+    selected_flight: list[SelectedFlight] | None = None
+    selected_outbound_flight: list[SelectedFlight] | None = None
+    selected_return_flight: list[SelectedFlight] | None = None
 
     def pb(self) -> Info:
         """(internal) Protobuf data. (`Info`)"""
@@ -130,12 +136,15 @@ class Query:
     def to_bytes(self) -> bytes:
         """Convert this query to bytes."""
         data = self.pb().SerializeToString()
-        if (
-            self.tfu
-            and self.trip == Trip.ROUND_TRIP
-            and self.selected_outbound is not None
-        ):
-            return _inject_selected_outbound(data, self.selected_outbound)
+        selected_by_leg: dict[int, list[SelectedFlight]] = {}
+        if self.selected_flight is not None:
+            selected_by_leg[0] = self.selected_flight
+        if self.selected_outbound_flight is not None:
+            selected_by_leg[0] = self.selected_outbound_flight
+        if self.selected_return_flight is not None:
+            selected_by_leg[1] = self.selected_return_flight
+        if selected_by_leg:
+            return _inject_selected_flights(data, selected_by_leg)
         return data
 
     def to_str(self) -> str:
@@ -159,12 +168,22 @@ class Query:
             url += "&tfu=" + self.tfu
         return url
 
+    def booking_url(self) -> str:
+        """Get the Google Flights booking page URL for this query."""
+        return "https://www.google.com/travel/flights/booking?" + urlencode(
+            self.booking_params()
+        )
+
     def params(self) -> dict[str, str]:
         """Create `params` in dictionary form."""
         params = {"tfs": self.to_str(), "hl": self.language, "curr": self.currency}
         if self.tfu:
             params["tfu"] = self.tfu
         return params
+
+    def booking_params(self) -> dict[str, str]:
+        """Create params for the booking page."""
+        return {"tfs": self.to_str(), "hl": self.language, "curr": self.currency}
 
     def __repr__(self) -> str:
         return "Query(...)"
@@ -253,43 +272,76 @@ def create_query(
     currency: str | Literal[""] | Currency = "",
     max_stops: int | None = None,
     tfu: str | None = None,
+    selected_flight_airline_code: str | None = None,
+    selected_flight_number: str | None = None,
+    selected_flight_segments: list[SelectedFlight] | None = None,
     selected_outbound_airline_code: str | None = None,
     selected_outbound_flight_number: str | None = None,
+    selected_outbound_segments: list[SelectedFlight] | None = None,
+    selected_return_airline_code: str | None = None,
+    selected_return_flight_number: str | None = None,
+    selected_return_segments: list[SelectedFlight] | None = None,
 ) -> Query:
-    """Create a query.
+    """Create a query."""
 
-    Args:
-        flights: The flight queries.
-        seat: Desired seat type.
-        trip: Trip type.
-        passengers: Passengers.
-        language: Set the language. Use `""` (blank str) to let Google decide.
-        currency: Set the currency. Use `""` (blank str) to let Google decide.
-        max_stops (optional): Set the maximum stops for every flight query, if present.
-        tfu (optional): Search token from a prior round-trip call for second-step lookup.
-        selected_outbound_airline_code (optional): Airline code of selected outbound.
-        selected_outbound_flight_number (optional): Flight number of selected outbound.
-    """
-    selected_outbound = None
-    if (
-        tfu
-        and trip == "round-trip"
-        and flights
-        and selected_outbound_airline_code
-        and selected_outbound_flight_number
-    ):
-        first_flight = flights[0]
-        if isinstance(first_flight.date, str):
-            first_date = first_flight.date
+    def _build_selected_flight(
+        flight_query: FlightQuery,
+        *,
+        airline_code: str | None,
+        flight_number: str | None,
+    ) -> SelectedFlight | None:
+        if not airline_code or not flight_number:
+            return None
+        if isinstance(flight_query.date, str):
+            flight_date = flight_query.date
         else:
-            first_date = first_flight.date.strftime("%Y-%m-%d")
-        selected_outbound = SelectedOutbound(
-            from_airport=first_flight.from_airport,
-            date=first_date,
-            to_airport=first_flight.to_airport,
-            airline_code=selected_outbound_airline_code,
-            flight_number=selected_outbound_flight_number,
+            flight_date = flight_query.date.strftime("%Y-%m-%d")
+        return SelectedFlight(
+            from_airport=flight_query.from_airport,
+            date=flight_date,
+            to_airport=flight_query.to_airport,
+            airline_code=airline_code,
+            flight_number=flight_number,
         )
+
+    def _build_selected_flights(
+        flight_query: FlightQuery | None,
+        *,
+        segments: list[SelectedFlight] | None,
+        airline_code: str | None,
+        flight_number: str | None,
+    ) -> list[SelectedFlight] | None:
+        if segments:
+            return segments
+        if flight_query is None:
+            return None
+        selected = _build_selected_flight(
+            flight_query,
+            airline_code=airline_code,
+            flight_number=flight_number,
+        )
+        return [selected] if selected is not None else None
+
+    selected_flight = _build_selected_flights(
+        flights[0] if flights else None,
+        segments=selected_flight_segments,
+        airline_code=selected_flight_airline_code,
+        flight_number=selected_flight_number,
+    )
+
+    selected_outbound_flight = _build_selected_flights(
+        flights[0] if flights else None,
+        segments=selected_outbound_segments,
+        airline_code=selected_outbound_airline_code,
+        flight_number=selected_outbound_flight_number,
+    )
+
+    selected_return_flight = _build_selected_flights(
+        flights[1] if len(flights) > 1 else None,
+        segments=selected_return_segments,
+        airline_code=selected_return_airline_code,
+        flight_number=selected_return_flight_number,
+    )
 
     return Query(
         flight_data=[flight._setmaxstops(max_stops).pb() for flight in flights],
@@ -299,5 +351,7 @@ def create_query(
         language=language,
         currency=currency,
         tfu=tfu,
-        selected_outbound=selected_outbound,
+        selected_flight=selected_flight,
+        selected_outbound_flight=selected_outbound_flight,
+        selected_return_flight=selected_return_flight,
     )

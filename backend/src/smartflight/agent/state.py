@@ -26,6 +26,8 @@ class FlightInformation(TypedDict):
     to_airport: str
     departure_date: str
     return_date: Optional[str]
+    booking_url: Optional[str]
+    tfu_token: Optional[str]
     # outbound ticket
     is_direct: bool
     airlines: List[str]

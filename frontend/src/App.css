@@ -285,6 +285,7 @@
 .book-btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.375rem;
   background-color: #059669;
   color: white;
@@ -295,10 +296,16 @@
   font-size: 0.875rem;
   cursor: pointer;
   transition: background-color 0.2s ease;
+  text-decoration: none;
 }
 
 .book-btn:hover {
   background-color: #047857;
+}
+
+.book-btn:disabled {
+  background-color: #94a3b8;
+  cursor: not-allowed;
 }
 
 .external-icon {

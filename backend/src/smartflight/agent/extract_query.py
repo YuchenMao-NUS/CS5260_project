@@ -3,10 +3,13 @@ from typing import List, Literal, Optional
 from openai import OpenAI
 from pydantic import BaseModel
 from datetime import datetime, timedelta
+import re
 
 import logging
 from smartflight.config import settings
 logger = logging.getLogger(__name__)
+
+IATA_CODE_PATTERN = re.compile(r"^[A-Z]{3}$")
 
 # Structured model for LLM extraction results
 class FlightQueryExtraction(BaseModel):
@@ -20,6 +23,26 @@ class FlightQueryExtraction(BaseModel):
     seat_classes: Optional[Literal["business", "economy", "first", "premium-economy"]]
     passengers: Optional[int]
 
+
+
+def _normalize_iata_code(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    code = value.strip().upper()
+    if IATA_CODE_PATTERN.fullmatch(code):
+        return code
+    return None
+
+
+def _normalize_iata_codes(values: Optional[List[str]]) -> List[str]:
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        code = _normalize_iata_code(value)
+        if code and code not in seen:
+            seen.add(code)
+            normalized.append(code)
+    return normalized
 
 
 def extract_query_node(state: AgentState) -> AgentState:
@@ -48,7 +71,7 @@ The user's current known location context is: {user_loc_str}.
 Extraction rules:
 1. has_origin: Set to true. If no departure city/airport is explicitly mentioned, implicitly infer the origin airport based on the user's location context.
 2. from_airport: MUST use 3-letter IATA codes. If not explicitly mentioned in the query, deduce the nearest major airport IATA code from their location (e.g. if location is Beijing, use PEK or PKX; if Singapore, use SIN). If location context is completely unhelpful, default to SIN.
-3. to_airports: MUST use 3-letter IATA codes (e.g. PEK, SHA, NRT). If no destination is mentioned, recommend 5 suitable destinations based on the origin.
+3. to_airports: MUST use only 3-letter IATA codes (e.g. PEK, SHA, NRT). Never return country names, city names, or region names. If the user gives a country or broad region like Malaysia, Japan, or Europe, convert it into a short list of specific destination airport IATA codes in that place.
 4. trip: Infer from context. Keywords like "round trip", "return", "来回" → round_trip; otherwise → one_way.
 5. departure_date: If not mentioned, use today ({today}). Format: YYYY-MM-DD.
 6. return_date: Only set for round_trip. If not mentioned, default to departure_date + 7 days.
@@ -71,19 +94,23 @@ Extraction rules:
     extraction: FlightQueryExtraction = response.choices[0].message.parsed
 
     # Fallback missing origin/destination checks
-    from_airport = extraction.from_airport
+    from_airport = _normalize_iata_code(extraction.from_airport)
     if not from_airport:
         # If LLM failed to infer it from context, try a generic fallback
         from_airport = "SIN"
 
-    to_airports = extraction.to_airports or []
+    raw_to_airports = extraction.to_airports or []
+    to_airports = _normalize_iata_codes(raw_to_airports)
     if not to_airports:
         # If LLM failed to provide a destination, we can either raise an error or provide generic suggestions
         # Usually we want the user to specify a destination
         return {
             **state,
             "flight_query": None,
-            "error_message": "Where would you like to go? Please provide a destination.",
+            "error_message": (
+                "I couldn't resolve the destination into airport codes. "
+                "Please specify a city or airport."
+            ),
         }
 
     # If the user asks for a flight where origin and destination are the same (or LLM confused them)
