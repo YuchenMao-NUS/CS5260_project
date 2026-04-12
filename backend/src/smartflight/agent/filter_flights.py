@@ -218,6 +218,16 @@ def filter_flights_node(state: AgentState) -> AgentState:
 
         sorted_choices = sorted(filtered_choices, key=sort_key)
 
+        # Step 4: if multi-destination, keep only the best option per destination
+        if is_multi_destination:
+            best_by_destination: dict[str, FlightInformation] = {}
+            for choice in sorted_choices:
+                to_airport = choice["to_airport"]
+                if to_airport not in best_by_destination:
+                    best_by_destination[to_airport] = choice
+
+            sorted_choices = list(best_by_destination.values())
+
         result = {
             **state,
             "flight_choices": sorted_choices,
