@@ -33,8 +33,7 @@ Determine if the user's input is related to searching, booking, inquiring about,
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_input},
         ],
-        response_format=IntentClassification,
-        temperature=0.0,
+        response_format=IntentClassification
     )
 
     is_flight_related = response.choices[0].message.parsed.is_flight_related

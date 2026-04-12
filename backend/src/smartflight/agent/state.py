@@ -12,6 +12,7 @@ class FlightQuery(TypedDict):
     seat_classes: Literal["business", "economy", "first", "premium-economy"]
     passengers: int
     is_multi_destination: bool           # Determine whether it is a single destination or multiple destinations.
+    description_of_recommendation: Optional[str]
 
 
 class FlightPreference(TypedDict):

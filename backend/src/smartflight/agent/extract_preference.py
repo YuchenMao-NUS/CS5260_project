@@ -54,8 +54,8 @@ Extraction rules:
    - null if not mentioned
 """.strip()
     
-    logger.debug("[LLM] system_prompt:\n%s", system_prompt)
-    logger.debug("[LLM] user_input: %s", user_input)
+    logger.debug("[extract_preference] system_prompt:\n%s", system_prompt)
+    logger.debug("[extract_preference] user_input: %s", user_input)
 
     response = client.beta.chat.completions.parse(
         model="gpt-5-mini",
@@ -78,6 +78,6 @@ Extraction rules:
     }
 
     return {
-        **state,
+        # **state,
         "flight_preference": flight_preference,
     }

@@ -2,12 +2,7 @@ from math import inf
 from smartflight.agent.state import *
 
 import logging
-# 普通日志（带时间等）
-logging.basicConfig(
-    level=logging.INFO,  # 改成 DEBUG 可以看更详细日志
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+
 # ✅ 专门用于“最终输出”的 logger
 result_logger = logging.getLogger("result")
 result_logger.propagate = False  # ❗关键：不要走 root logger
@@ -158,13 +153,17 @@ def filter_flights_node(state: AgentState) -> AgentState:
         direct_only=True, price range, duration range
     - Soft preferences:
         preferred_airlines
+    - If flight_query.is_multi_destination=True:
+        keep only the best ticket for each destination
     """
     flight_choices = state.get("flight_choices")
     flight_preference = state.get("flight_preference") or {}
+    flight_query = state.get("flight_query") or {}
+    is_multi_destination = flight_query.get("is_multi_destination", False)
 
     if not flight_choices:
         return {
-            **state,
+            # **state,
             "error_message": None,
         }
 
@@ -179,7 +178,7 @@ def filter_flights_node(state: AgentState) -> AgentState:
         # If everything got filtered out, return empty list instead of failing
         if not filtered_choices:
             return {
-                **state,
+                # **state,
                 "flight_choices": [],
                 "error_message": None,
             }
@@ -329,6 +328,6 @@ def filter_flights_node(state: AgentState) -> AgentState:
 
     except Exception as e:
         return {
-            **state,
+            # **state,
             "error_message": f"Flight filtering failed: {e}",
         }

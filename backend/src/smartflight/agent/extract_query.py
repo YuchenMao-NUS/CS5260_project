@@ -20,6 +20,7 @@ class FlightQueryExtraction(BaseModel):
     seat_classes: Optional[Literal["business", "economy", "first", "premium-economy"]]
     passengers: Optional[int]
     is_multi_destination: Optional[bool]                # Boolean values ​​for LLM output
+    description_of_recommendation: Optional[str]
 
 
 
@@ -64,10 +65,11 @@ Extraction rules:
 8. is_multi_destination:
    - Set to `true` when the user explicitly wants to visit more than one destination in a single connected trip, or if they are asking for recommendations/options (e.g., "I want to go to Tokyo and Osaka").
    - Set to `false` if they only want to visit one destination. (e.g., "I want to go to Tokyo").
+9. description_of_recommendation: Give a brief description of your recommendation.
 """.strip()
     
-    logger.debug("[LLM] system_prompt:\n%s", system_prompt)
-    logger.debug("[LLM] user_input: %s", user_input)
+    logger.debug("[extract_query] system_prompt:\n%s", system_prompt)
+    logger.debug("[extract_query] user_input: %s", user_input)
 
     response = client.beta.chat.completions.parse(
         model="gpt-5-mini",
@@ -91,7 +93,7 @@ Extraction rules:
         # If LLM failed to provide a destination, we can either raise an error or provide generic suggestions
         # Usually we want the user to specify a destination
         return {
-            **state,
+            # **state,
             "flight_query": None,
             "error_message": "Where would you like to go? Please provide a destination.",
         }
@@ -99,7 +101,7 @@ Extraction rules:
     # If the user asks for a flight where origin and destination are the same (or LLM confused them)
     if from_airport in to_airports:
         return {
-            **state,
+            # **state,
             "flight_query": None,
             "error_message": f"Your origin and destination both seem to be {from_airport}. Please specify a different destination.",
         }
@@ -124,10 +126,12 @@ Extraction rules:
         "return_date": return_date,
         "seat_classes": seat_classes,
         "passengers": extraction.passengers or 1,
+        "is_multi_destination": extraction.is_multi_destination,
+        "description_of_recommendation": extraction.description_of_recommendation
     }
 
     return {
-        **state,
+        # **state,
         "flight_query": flight_query,
         "error_message": None,
     }

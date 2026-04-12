@@ -382,7 +382,7 @@ def search_flights_node(state: AgentState) -> AgentState:
 
     if not flight_query:
         return {
-            **state,
+            # **state,
             "flight_choices": None,
             "error_message": "Missing flight_query.",
         }
@@ -392,7 +392,7 @@ def search_flights_node(state: AgentState) -> AgentState:
 
         if not flight_query["from_airport"] or not flight_query["to_airports"]:
             return {
-                **state,
+                # **state,
                 "flight_choices": None,
                 "error_message": "Missing airports.",
             }
@@ -403,20 +403,20 @@ def search_flights_node(state: AgentState) -> AgentState:
             flight_choices = search_round_trip(flight_query)
         else:
             return {
-                **state,
+                # **state,
                 "flight_choices": None,
                 "error_message": f"Unsupported trip type: {trip}",
             }
 
         return {
-            **state,
+            # **state,
             "flight_choices": flight_choices,
             "error_message": None,
         }
 
     except Exception as e:
         return {
-            **state,
+            # **state,
             "flight_choices": None,
             "error_message": f"Flight search failed: {e}",
         }
