@@ -63,7 +63,7 @@ Extraction rules:
 6. seat_classes: If not specified, return "economy".
 7. passengers: If not specified, default to 1.
 8. is_multi_destination:
-   - Set to `true` when the user explicitly wants to visit more than one destination in a single connected trip, or if they are asking for recommendations/options (e.g., "I want to go to Tokyo and Osaka").
+   - Set to `true` when the user has no specific destination.
    - Set to `false` if they only want to visit one destination. (e.g., "I want to go to Tokyo").
 9. description_of_recommendation: Give a brief description of your recommendation.
 """.strip()
