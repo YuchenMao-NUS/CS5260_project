@@ -68,10 +68,14 @@
   align-self: flex-start;
 }
 
+.message-flights-block + .bubble {
+  margin-top: 1rem;
+}
+
 .message-flights-block {
   width: 100%;
   align-self: stretch;
-  margin-top: 0.5rem;
+  margin-top: 1rem;
 }
 
 .bubble {

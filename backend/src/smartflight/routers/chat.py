@@ -6,6 +6,7 @@ from starlette.concurrency import run_in_threadpool
 from smartflight.services.chat_formatting import format_demo_flight, format_graph_flight
 from smartflight.services.nlu import run_flight_search
 from smartflight.services.flight_search import get_flights, is_demo_trigger
+from smartflight.services.recommendation_text import rephrase_recommendation_as_assistant
 
 router = APIRouter()
 
@@ -46,6 +47,7 @@ class ChatResponse(BaseModel):
 
     reply: str
     flights: list[FlightOption] | None = None
+    description_of_recommendation: str | None = None
     intent: dict | None = None
 
 
@@ -112,9 +114,17 @@ async def chat(request: ChatRequest):
                 reply = "No matching flights were found for your request."
                 flight_options = None
 
+        description_of_recommendation = await run_in_threadpool(
+            rephrase_recommendation_as_assistant,
+            query.get("description_of_recommendation"),
+            flight_query=query,
+            flight_count=len(flight_options) if flight_options else 0,
+        )
+
         return ChatResponse(
             reply=reply,
             flights=flight_options,
+            description_of_recommendation=description_of_recommendation,
             intent=intent,
         )
     except Exception as e:

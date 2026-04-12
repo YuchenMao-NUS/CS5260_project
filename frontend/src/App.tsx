@@ -5,7 +5,12 @@ import type { FlightOption, FilterTag } from './types'
 import { sendChatMessage } from './api'
 
 export default function App() {
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; flights?: FlightOption[] }>>([])
+  const [messages, setMessages] = useState<Array<{
+    role: 'user' | 'assistant'
+    content: string
+    flights?: FlightOption[]
+    descriptionOfRecommendation?: string
+  }>>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [activeTags, setActiveTags] = useState<FilterTag[]>([])
@@ -94,6 +99,7 @@ export default function App() {
           role: 'assistant',
           content: data.reply,
           flights: data.flights ?? undefined,
+          descriptionOfRecommendation: data.description_of_recommendation ?? undefined,
         },
       ])
     } catch (err) {
@@ -130,6 +136,7 @@ export default function App() {
               role={m.role}
               content={m.content}
               flights={m.flights}
+              descriptionOfRecommendation={m.descriptionOfRecommendation}
               filtersRef={i === messages.length - 1 ? filtersRef : undefined}
               onToggleTag={handleToggleTag}
             />

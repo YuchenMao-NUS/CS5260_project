@@ -31,5 +31,6 @@ export interface FilterTag {
 export interface ChatResponse {
   reply: string
   flights: FlightOption[] | null
+  description_of_recommendation?: string | null
   intent?: Record<string, unknown>
 }
