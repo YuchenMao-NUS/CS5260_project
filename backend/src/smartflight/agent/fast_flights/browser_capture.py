@@ -7,6 +7,7 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from urllib.parse import urlencode
 
@@ -267,11 +268,20 @@ async def fetch_booking_links(
     headless: bool = True,
     timeout_ms: int = 300000,
 ) -> list[str]:
+    started_at = perf_counter()
     links: list[str] = []
     done = asyncio.Event()
     booking_response_seen = asyncio.Event()
     pending_tasks: set[asyncio.Task[None]] = set()
     first_link_lock = asyncio.Lock()
+    booking_response_elapsed_s: float | None = None
+
+    logger.info(
+        "Starting booking link fetch: headless=%s, timeout_ms=%d, url=%s",
+        headless,
+        timeout_ms,
+        url,
+    )
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=headless)
@@ -286,9 +296,11 @@ async def fetch_booking_links(
             return result
 
         async def handle_response(response: Response) -> None:
+            nonlocal booking_response_elapsed_s
             if BOOKING_RESULTS_URL_PART not in response.url:
                 return
             booking_response_seen.set()
+            booking_response_elapsed_s = perf_counter() - started_at
 
             response_text = await response.text()
             extracted_links = _extract_booking_links(response_text)
@@ -296,6 +308,13 @@ async def fetch_booking_links(
                 logger.warning(
                     "fetch_booking_links: booking response contained no extractable links; response prefix=%s",
                     response_text[:500].replace("\n", "\\n"),
+                )
+            else:
+                logger.info(
+                    "Booking response received: links=%d, elapsed=%.2fs, response_url=%s",
+                    len(extracted_links),
+                    booking_response_elapsed_s,
+                    response.url,
                 )
 
             link = extracted_links[0] if extracted_links else None
@@ -319,8 +338,9 @@ async def fetch_booking_links(
             await asyncio.wait_for(booking_response_seen.wait(), timeout=timeout_ms / 1000)
         except TimeoutError:
             logger.warning(
-                "fetch_booking_links: timed out waiting for booking response; current_page=%s",
+                "fetch_booking_links: timed out waiting for booking response; current_page=%s, elapsed=%.2fs",
                 page.url,
+                perf_counter() - started_at,
             )
             return await _finish([])
 
@@ -329,12 +349,21 @@ async def fetch_booking_links(
                 await asyncio.wait_for(done.wait(), timeout=NO_LINK_GRACE_PERIOD_MS / 1000)
             except TimeoutError:
                 logger.warning(
-                    "fetch_booking_links: no extractable booking links found after booking response; current_page=%s",
+                    "fetch_booking_links: no extractable booking links found after booking response; current_page=%s, elapsed=%.2fs",
                     page.url,
+                    perf_counter() - started_at,
                 )
                 return await _finish([])
 
-        return await _finish(links)
+        result = await _finish(links)
+        logger.info(
+            "Finished booking link fetch: links=%d, response_seen_elapsed=%s, total_elapsed=%.2fs, url=%s",
+            len(result),
+            f"{booking_response_elapsed_s:.2f}s" if booking_response_elapsed_s is not None else "n/a",
+            perf_counter() - started_at,
+            url,
+        )
+        return result
 
 
 async def fetch_booking_links_for_query(

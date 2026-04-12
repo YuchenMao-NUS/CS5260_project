@@ -13,7 +13,7 @@ from smartflight.agent.state import AgentState, FlightInformation, FlightQuery
 
 logger = logging.getLogger(__name__)
 
-MAX_ROUTE_SEARCH_WORKERS = 4
+DEFAULT_MAX_ROUTE_SEARCH_CONCURRENCY = 10
 
 
 def _get_flights_with_retry(query, route_label: str, max_retries: int = 3, delay: float = 1.0):
@@ -52,18 +52,18 @@ def _get_seat(seat_class: str) -> str:
     return seat_map[seat_class]
 
 
-def _max_workers(route_count: int) -> int:
-    return max(1, min(route_count, MAX_ROUTE_SEARCH_WORKERS))
+def _bounded_concurrency(task_count: int, max_concurrency: int) -> int:
+    return max(1, min(task_count, max_concurrency))
 
 
-def _collect_parallel_route_results(route_tasks):
+def _collect_parallel_route_results(route_tasks, *, max_concurrency: int):
     if not route_tasks:
         return []
 
     ordered_results = [None] * len(route_tasks)
-    max_workers = _max_workers(len(route_tasks))
+    worker_count = _bounded_concurrency(len(route_tasks), max_concurrency)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
         future_to_index = {
             executor.submit(task["fn"]): idx for idx, task in enumerate(route_tasks)
         }
@@ -147,7 +147,11 @@ def _search_one_way_route(
     return flight_choices
 
 
-def search_one_way(flight_query: FlightQuery) -> list[FlightInformation]:
+def search_one_way(
+    flight_query: FlightQuery,
+    *,
+    max_concurrency: int = DEFAULT_MAX_ROUTE_SEARCH_CONCURRENCY,
+) -> list[FlightInformation]:
     """
     Search one-way flights and return normalized FlightInformation list.
     """
@@ -165,7 +169,7 @@ def search_one_way(flight_query: FlightQuery) -> list[FlightInformation]:
         departure_date,
         seat_class,
         passengers,
-        _max_workers(len(to_airports)),
+        _bounded_concurrency(len(to_airports), max_concurrency),
     )
 
     route_tasks = [
@@ -182,7 +186,10 @@ def search_one_way(flight_query: FlightQuery) -> list[FlightInformation]:
         for to_airport in to_airports
     ]
 
-    route_results = _collect_parallel_route_results(route_tasks)
+    route_results = _collect_parallel_route_results(
+        route_tasks,
+        max_concurrency=max_concurrency,
+    )
     flight_choices = [
         choice for route_result in route_results for choice in route_result
     ]
@@ -317,7 +324,11 @@ def _search_round_trip_route(
     return flight_choices
 
 
-def search_round_trip(flight_query: FlightQuery) -> list[FlightInformation]:
+def search_round_trip(
+    flight_query: FlightQuery,
+    *,
+    max_concurrency: int = DEFAULT_MAX_ROUTE_SEARCH_CONCURRENCY,
+) -> list[FlightInformation]:
     """
     Search round-trip flights and return normalized FlightInformation list.
     """
@@ -340,7 +351,7 @@ def search_round_trip(flight_query: FlightQuery) -> list[FlightInformation]:
         return_date,
         seat_class,
         passengers,
-        _max_workers(len(to_airports)),
+        _bounded_concurrency(len(to_airports), max_concurrency),
     )
 
     route_tasks = [
@@ -358,7 +369,10 @@ def search_round_trip(flight_query: FlightQuery) -> list[FlightInformation]:
         for to_airport in to_airports
     ]
 
-    route_results = _collect_parallel_route_results(route_tasks)
+    route_results = _collect_parallel_route_results(
+        route_tasks,
+        max_concurrency=max_concurrency,
+    )
     flight_choices = [
         choice for route_result in route_results for choice in route_result
     ]
