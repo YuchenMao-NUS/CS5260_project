@@ -1,4 +1,11 @@
 """Formatting helpers for chat flight responses."""
+def _extract_booking_url(choice: dict) -> str | None:
+    """Normalize booking URL fields from different flight result shapes."""
+    return (
+        choice.get("bookingUrl")
+        or choice.get("booking_url")
+        or choice.get("booking_token")
+    )
 
 
 def _format_datetime(value) -> str:
@@ -100,13 +107,14 @@ def format_graph_flight(choice: dict, index: int) -> dict:
     elif len(legs) > 2:
         trip_type = "multi_city"
 
-    return {
+    formatted = {
         "id": f"result-{index}",
         "price": float(choice.get("price") or 0.0),
         "tripType": trip_type,
         "legs": legs,
-        "bookingUrl": choice.get("booking_token")  # or bookingUrl depending on what API returns
+        "bookingUrl": _extract_booking_url(choice),
     }
+    return formatted
 
 def format_demo_flight(flight: dict) -> dict:
     """Normalize a demo flight into the API response shape."""

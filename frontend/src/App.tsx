@@ -121,7 +121,7 @@ export default function App() {
           {messages.length === 0 && (
             <div className="welcome">
               <p>Tell me your travel plans in natural language.</p>
-              <p className="hint">e.g. &quot;Singapore to Tokyo next month, budget 500 SGD&quot; — or type &quot;demo&quot; for sample flights with filters.</p>
+              <p className="hint">e.g. &quot;Singapore to Malaysia next month, budget 500 SGD&quot; — or type &quot;demo&quot; for sample flights with filters.</p>
             </div>
           )}
           {messages.map((m, i) => (

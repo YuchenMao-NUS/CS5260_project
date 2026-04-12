@@ -1,6 +1,7 @@
 """Chat / flight search API endpoints."""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from smartflight.services.chat_formatting import format_demo_flight, format_graph_flight
 from smartflight.services.nlu import run_flight_search
@@ -55,7 +56,11 @@ async def chat(request: ChatRequest):
     """
     try:
         user_context = request.context.model_dump() if request.context else {}
-        result = run_flight_search(request.message, user_context)
+        result = await run_in_threadpool(
+            run_flight_search,
+            request.message,
+            user_context,
+        )
         intent = {
             "flight_query": result.get("flight_query"),
             "flight_preference": result.get("flight_preference"),

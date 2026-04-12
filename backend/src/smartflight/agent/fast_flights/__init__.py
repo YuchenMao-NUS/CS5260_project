@@ -4,6 +4,7 @@ from .querying import (
     FlightQuery,
     Query,
     Passengers,
+    SelectedFlight,
     create_query,
     create_query as create_filter,  # alias
 )
@@ -13,6 +14,7 @@ __all__ = [
     "FlightQuery",
     "Query",
     "Passengers",
+    "SelectedFlight",
     "create_query",
     "create_filter",
     "get_flights",

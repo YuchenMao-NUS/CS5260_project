@@ -1,8 +1,20 @@
-from math import inf
 from smartflight.agent.state import *
+from smartflight.agent.fast_flights import (
+    FlightQuery as SearchFlightQuery,
+    Passengers,
+    SelectedFlight,
+    create_query,
+)
+from smartflight.agent.fast_flights.browser_capture import fetch_booking_links_for_query
 
+import asyncio
 import logging
 
+# 普通日志（带时间等）
+logging.basicConfig(
+    level=logging.INFO,  # 改成 DEBUG 可以看更详细日志
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+)
 # ✅ 专门用于“最终输出”的 logger
 result_logger = logging.getLogger("result")
 result_logger.propagate = False  # ❗关键：不要走 root logger
@@ -11,6 +23,155 @@ handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("%(message)s"))  # ❗只输出内容
 result_logger.addHandler(handler)
 result_logger.setLevel(logging.INFO)
+
+
+def _get_seat(seat_class: str) -> str:
+    seat_map = {
+        "economy": "economy",
+        "business": "business",
+        "first": "first",
+        "premium-economy": "premium-economy",
+    }
+    if seat_class not in seat_map:
+        raise ValueError(f"Unsupported seat class: {seat_class}")
+    return seat_map[seat_class]
+
+
+def _format_segment_date(segment) -> str | None:
+    departure = getattr(segment, "departure", None)
+    date_value = getattr(departure, "date", None)
+    if isinstance(date_value, list):
+        date_value = tuple(date_value)
+    if not isinstance(date_value, tuple) or len(date_value) != 3:
+        return None
+    year, month, day = date_value
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _build_selected_segments(itinerary) -> list[SelectedFlight]:
+    selected_segments: list[SelectedFlight] = []
+    segments = itinerary if isinstance(itinerary, list) else getattr(itinerary, "flights", []) or []
+    for segment in segments:
+        from_airport = getattr(getattr(segment, "from_airport", None), "code", None)
+        to_airport = getattr(getattr(segment, "to_airport", None), "code", None)
+        airline_code = getattr(segment, "flight_number_airline_code", None)
+        flight_number = getattr(segment, "flight_number_numeric", None)
+        flight_date = _format_segment_date(segment)
+        if (
+            not from_airport
+            or not to_airport
+            or not airline_code
+            or not flight_number
+            or not flight_date
+        ):
+            return []
+        selected_segments.append(
+            SelectedFlight(
+                from_airport=from_airport,
+                date=flight_date,
+                to_airport=to_airport,
+                airline_code=airline_code,
+                flight_number=flight_number,
+            )
+        )
+    return selected_segments
+
+
+def _fetch_one_way_booking_url(
+    *,
+    from_airport: str,
+    to_airport: str,
+    departure_date: str,
+    seat_class: str,
+    passengers: int,
+    flight_result,
+) -> str | None:
+    selected_segments = _build_selected_segments(flight_result)
+    if not selected_segments:
+        return None
+
+    booking_query = create_query(
+        flights=[
+            SearchFlightQuery(
+                date=departure_date,
+                from_airport=from_airport,
+                to_airport=to_airport,
+            )
+        ],
+        seat=_get_seat(seat_class),
+        trip="one-way",
+        passengers=Passengers(adults=passengers),
+        language="en-US",
+        currency="SGD",
+        selected_flight_segments=selected_segments,
+    )
+    try:
+        booking_links = asyncio.run(
+            fetch_booking_links_for_query(
+                booking_query,
+                headless=True,
+                timeout_ms=300000,
+            )
+        )
+    except Exception as exc:
+        result_logger.warning("Final one-way booking fetch failed: %s", exc)
+        return None
+
+    return booking_links[0] if booking_links else None
+
+
+def _fetch_round_trip_booking_url(
+    *,
+    from_airport: str,
+    to_airport: str,
+    departure_date: str,
+    return_date: str,
+    seat_class: str,
+    passengers: int,
+    tfu_token: str | None,
+    outbound_option,
+    inbound_option,
+) -> str | None:
+    outbound_segments = _build_selected_segments(outbound_option)
+    inbound_segments = _build_selected_segments(inbound_option)
+    if not outbound_segments or not inbound_segments:
+        return None
+
+    booking_query = create_query(
+        flights=[
+            SearchFlightQuery(
+                date=departure_date,
+                from_airport=from_airport,
+                to_airport=to_airport,
+            ),
+            SearchFlightQuery(
+                date=return_date,
+                from_airport=to_airport,
+                to_airport=from_airport,
+            ),
+        ],
+        seat=_get_seat(seat_class),
+        trip="round-trip",
+        passengers=Passengers(adults=passengers),
+        language="en-US",
+        currency="SGD",
+        tfu=tfu_token,
+        selected_outbound_segments=outbound_segments,
+        selected_return_segments=inbound_segments,
+    )
+    try:
+        booking_links = asyncio.run(
+            fetch_booking_links_for_query(
+                booking_query,
+                headless=True,
+                timeout_ms=300000,
+            )
+        )
+    except Exception as exc:
+        result_logger.warning("Final round-trip booking fetch failed: %s", exc)
+        return None
+
+    return booking_links[0] if booking_links else None
 
 def _get_total_price(choice: FlightInformation) -> float:
     if choice["trip"] == "one_way":
@@ -141,6 +302,40 @@ def _compute_rank_score(
     return score
 
 
+def _attach_booking_url(choice: FlightInformation, flight_query: FlightQuery) -> FlightInformation:
+    if choice.get("booking_url"):
+        return choice
+
+    booking_url = None
+
+    if choice["trip"] == "one_way":
+        booking_url = _fetch_one_way_booking_url(
+            from_airport=choice["from_airport"],
+            to_airport=choice["to_airport"],
+            departure_date=choice["departure_date"],
+            seat_class=flight_query["seat_classes"],
+            passengers=flight_query["passengers"],
+            flight_result=choice.get("flights") or [],
+        )
+    elif choice["trip"] == "round_trip" and choice.get("return_date"):
+        booking_url = _fetch_round_trip_booking_url(
+            from_airport=choice["from_airport"],
+            to_airport=choice["to_airport"],
+            departure_date=choice["departure_date"],
+            return_date=choice["return_date"],
+            seat_class=flight_query["seat_classes"],
+            passengers=flight_query["passengers"],
+            tfu_token=choice.get("tfu_token"),
+            outbound_option=choice.get("flights") or [],
+            inbound_option=choice.get("flights_2") or [],
+        )
+
+    return {
+        **choice,
+        "booking_url": booking_url,
+    }
+
+
 def filter_flights_node(state: AgentState) -> AgentState:
     """
     Filter and sort flight_choices using flight_preference.
@@ -216,6 +411,11 @@ def filter_flights_node(state: AgentState) -> AgentState:
             )
 
         sorted_choices = sorted(filtered_choices, key=sort_key)
+        if flight_query:
+            sorted_choices = [
+                _attach_booking_url(choice, flight_query)
+                for choice in sorted_choices
+            ]
 
         # Step 4: if multi-destination, keep only the best option per destination
         if is_multi_destination:

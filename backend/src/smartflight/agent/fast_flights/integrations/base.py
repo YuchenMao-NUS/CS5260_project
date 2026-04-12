@@ -1,6 +1,7 @@
 import os
 from abc import ABC
 
+from ..model import Flights
 from ..querying import Query
 
 try:
@@ -22,6 +23,12 @@ class Integration(ABC):
             q: The query.
         """
         raise NotImplementedError
+
+    def fetch_booking_links(
+        self, q: Query, results: list[Flights], /
+    ) -> list[str] | None:
+        """Optionally fetch booking links for parsed results."""
+        return None
 
 
 def get_env(k: str, /) -> str:

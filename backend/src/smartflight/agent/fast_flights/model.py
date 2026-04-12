@@ -60,3 +60,4 @@ class Flights:
     flights: list[SingleFlight]
     carbon: CarbonEmission
     tfu_token: str | None = None
+    booking_url: str | None = None

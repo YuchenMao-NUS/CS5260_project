@@ -11,6 +11,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
+
 def _get_flights_with_retry(query, max_retries=3, delay=1.0):
     for attempt in range(max_retries):
         try:
@@ -111,6 +112,8 @@ def search_one_way(flight_query: FlightQuery) -> list[FlightInformation]:
                 "to_airport": to_airport,
                 "departure_date": departure_date,
                 "return_date": None,
+                "booking_url": None,
+                "tfu_token": None,
                 "is_direct": len(outbound_flights) == 1,
                 "airlines": list(r.airlines),
                 "price": float(r.price),
@@ -328,6 +331,8 @@ def search_round_trip(flight_query: FlightQuery) -> list[FlightInformation]:
                         "to_airport": to_airport,
                         "departure_date": departure_date,
                         "return_date": return_date,
+                        "booking_url": None,
+                        "tfu_token": selected_token,
                         # outbound ticket
                         "is_direct": len(outbound_flights) == 1,
                         "airlines": list(outbound_option.airlines),
@@ -420,24 +425,3 @@ def search_flights_node(state: AgentState) -> AgentState:
             "flight_choices": None,
             "error_message": f"Flight search failed: {e}",
         }
-        
-        
-        
-if __name__ == "__main__":
-    query = create_query(
-        flights=[
-            FlightQuery(
-                date="2026-04-21",
-                from_airport="PEK",
-                to_airport="HND",
-            )
-        ],
-        seat="economy",
-        trip="one-way",
-        passengers=Passengers(adults=1),
-        language="en-US",
-        currency="SGD",
-    )
-
-    results = get_flights(query)
-    print(results)

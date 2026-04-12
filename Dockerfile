@@ -30,13 +30,18 @@ FROM --platform=$TARGETPLATFORM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PORT=8080
+    PORT=8080 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PLAYWRIGHT_SKIP_BROWSER_GC=1
 
 WORKDIR /app
 
 COPY --from=backend-builder /usr/local /usr/local
 COPY backend/src ./backend/src
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+
+RUN python -m playwright install-deps chromium \
+    && python -m playwright install chromium
 
 EXPOSE 8080
 
