@@ -4,7 +4,7 @@ from smartflight.agent.agent import graph
 from smartflight.config import settings
 
 
-def run_flight_search(message: str, user_context: dict = None) -> dict:
+def run_flight_search(message: str, user_context: dict = None, session_id: str = "default_session") -> dict:
     """
     Run the full flight agent pipeline and return the graph state.
     """
@@ -21,7 +21,9 @@ def run_flight_search(message: str, user_context: dict = None) -> dict:
         if not settings.openai_enabled:
             raise ValueError("OPENAI_API_KEY not set")
 
-        return graph.invoke(input_state)
+        thread_config = {"configurable": {"thread_id": session_id}}
+
+        return graph.invoke(input_state, config=thread_config)
     except Exception as e:
         # Fallback to rule-based placeholder if LLM fails or no API key
         msg_lower = message.lower()

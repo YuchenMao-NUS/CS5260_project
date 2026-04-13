@@ -19,6 +19,7 @@ class ChatRequest(BaseModel):
     """Chat request body."""
 
     message: str
+    session_id: str = "default_user_session"  # Add session_id to support multi-turn conversation memory
     context: ChatContext | None = None
 
 
@@ -62,12 +63,21 @@ async def chat(request: ChatRequest):
             run_flight_search,
             request.message,
             user_context,
+            request.session_id
         )
         intent = {
             "flight_query": result.get("flight_query"),
             "flight_preference": result.get("flight_preference"),
             "error_message": result.get("error_message"),
         }
+
+        if intent.get("error_message"):
+            return ChatResponse(
+                reply=intent["error_message"],
+                flights=None,
+                description_of_recommendation=None,
+                intent=intent
+            )
 
         use_demo = is_demo_trigger(request.message)
         graph_flights = result.get("flight_choices") or []
