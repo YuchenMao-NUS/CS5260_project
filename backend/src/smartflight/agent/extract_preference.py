@@ -28,6 +28,9 @@ def extract_preference_node(state: AgentState) -> AgentState:
         
     user_input = state["user_input"]
 
+    # Retrieve historical preferences from the current state; if no such preferences exist, initialize them to an empty dictionary
+    existing_preference = state.get("flight_preference") or {}
+
     system_prompt = """
 You are a flight preference extraction assistant. Extract the user's soft preferences from their natural language input.
 All fields are optional — only populate a field if the user explicitly or implicitly expresses that preference.
@@ -67,6 +70,20 @@ Extraction rules:
     )
 
     extraction: FlightPreferenceExtraction = response.choices[0].message.parsed
+
+    # Merging old and new preferences
+    # If the field extracted this time is not None, then overwrite.
+    # Otherwise, revert to using the value stored in existing_preference.
+    merged_preference = {
+        "direct_only": extraction.direct_only if extraction.direct_only is not None else existing_preference.get("direct_only"),
+        "preferred_airlines": extraction.preferred_airlines if extraction.preferred_airlines is not None else existing_preference.get("preferred_airlines"),
+        "max_price": extraction.max_price if extraction.max_price is not None else existing_preference.get("max_price"),
+        "min_price": extraction.min_price if extraction.min_price is not None else existing_preference.get("min_price"),
+        "max_duration": extraction.max_duration if extraction.max_duration is not None else existing_preference.get("max_duration"),
+        "min_duration": extraction.min_duration if extraction.min_duration is not None else existing_preference.get("min_duration"),
+    }
+
+    logger.info(f"[extract_preference] Updated Preferences: {merged_preference}")
 
     flight_preference = {
         "direct_only": extraction.direct_only,

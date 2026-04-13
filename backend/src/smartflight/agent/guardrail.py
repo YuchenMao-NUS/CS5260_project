@@ -40,6 +40,7 @@ Determine if the user's input is related to searching, booking, inquiring about,
     logger.debug(f"[Guardrail] Input: {user_input} | Is Flight Related: {is_flight_related}")
 
     if not is_flight_related:
+        print("[Debug]: The user's input is related to flight tickets.")
         return {
             **state,
             "error_message": "I'm your personal flight assistant; currently, I can only help you search for and book flights. Do you have any travel plans?"

@@ -2,14 +2,14 @@ from datetime import datetime, timedelta
 import logging
 import re
 from typing import List, Literal, Optional
-
 from openai import OpenAI
 from pydantic import BaseModel
-
 from smartflight.agent.state import AgentState
 from smartflight.config import settings
 
 logger = logging.getLogger(__name__)
+
+
 
 IATA_CODE_PATTERN = re.compile(r"^[A-Z]{3}$")
 
