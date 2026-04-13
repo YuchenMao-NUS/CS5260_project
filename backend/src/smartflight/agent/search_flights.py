@@ -10,6 +10,7 @@ from smartflight.agent.fast_flights import (
     get_flights,
 )
 from smartflight.agent.state import AgentState, FlightInformation, FlightQuery
+from smartflight.services.progress import emit_progress, is_progress_cancelled
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,8 @@ def _collect_parallel_route_results(route_tasks, *, max_concurrency: int):
     ordered_results = [None] * len(route_tasks)
     worker_count = _bounded_concurrency(len(route_tasks), max_concurrency)
 
+    completed_count = 0
+
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         future_to_index = {
             executor.submit(task["fn"]): idx for idx, task in enumerate(route_tasks)
@@ -73,6 +76,13 @@ def _collect_parallel_route_results(route_tasks, *, max_concurrency: int):
             route_label = route_tasks[idx]["label"]
             try:
                 ordered_results[idx] = future.result()
+                if route_tasks[idx].get("progress_id"):
+                    completed_count += 1
+                    emit_progress(
+                        route_tasks[idx]["progress_id"],
+                        "searching_flights",
+                        f"Finished {route_tasks[idx]['display_label']} ({completed_count}/{len(route_tasks)})...",
+                    )
             except Exception as e:
                 logger.warning(
                     "Skipping route %s due to error: %s",
@@ -90,9 +100,22 @@ def _search_one_way_route(
     departure_date: str,
     seat_class: str,
     passengers: int,
+    progress_id: str | None = None,
+    route_index: int | None = None,
+    route_total: int | None = None,
 ) -> list[FlightInformation]:
     route_label = f"{from_airport} -> {to_airport} on {departure_date}"
     started_at = perf_counter()
+
+    if is_progress_cancelled(progress_id):
+        return []
+
+    if progress_id and route_index is not None and route_total is not None:
+        emit_progress(
+            progress_id,
+            "searching_flights",
+            f"Checking {from_airport} -> {to_airport} ({route_index}/{route_total})...",
+        )
 
     query = create_query(
         flights=[
@@ -151,6 +174,7 @@ def search_one_way(
     flight_query: FlightQuery,
     *,
     max_concurrency: int = DEFAULT_MAX_ROUTE_SEARCH_CONCURRENCY,
+    progress_id: str | None = None,
 ) -> list[FlightInformation]:
     """
     Search one-way flights and return normalized FlightInformation list.
@@ -172,18 +196,32 @@ def search_one_way(
         _bounded_concurrency(len(to_airports), max_concurrency),
     )
 
+    if progress_id:
+        emit_progress(
+            progress_id,
+            "searching_flights",
+            f"Searching {len(to_airports)} destination(s) from {from_airport} on {departure_date}...",
+        )
+        if is_progress_cancelled(progress_id):
+            return []
+
     route_tasks = [
         {
             "label": f"{from_airport} -> {to_airport} on {departure_date}",
-            "fn": lambda to_airport=to_airport: _search_one_way_route(
+            "display_label": f"{from_airport} -> {to_airport}",
+            "progress_id": progress_id,
+            "fn": lambda to_airport=to_airport, route_index=idx + 1, route_total=len(to_airports): _search_one_way_route(
                 from_airport=from_airport,
                 to_airport=to_airport,
                 departure_date=departure_date,
                 seat_class=seat_class,
                 passengers=passengers,
+                progress_id=progress_id,
+                route_index=route_index,
+                route_total=route_total,
             ),
         }
-        for to_airport in to_airports
+        for idx, to_airport in enumerate(to_airports)
     ]
 
     route_results = _collect_parallel_route_results(
@@ -212,9 +250,22 @@ def _search_round_trip_route(
     return_date: str,
     seat_class: str,
     passengers: int,
+    progress_id: str | None = None,
+    route_index: int | None = None,
+    route_total: int | None = None,
 ) -> list[FlightInformation]:
     route_label = f"{from_airport} <-> {to_airport} ({departure_date} / {return_date})"
     started_at = perf_counter()
+
+    if is_progress_cancelled(progress_id):
+        return []
+
+    if progress_id and route_index is not None and route_total is not None:
+        emit_progress(
+            progress_id,
+            "searching_flights",
+            f"Checking {from_airport} <-> {to_airport} ({route_index}/{route_total})...",
+        )
 
     flights = [
         FastFlightQuery(
@@ -328,6 +379,7 @@ def search_round_trip(
     flight_query: FlightQuery,
     *,
     max_concurrency: int = DEFAULT_MAX_ROUTE_SEARCH_CONCURRENCY,
+    progress_id: str | None = None,
 ) -> list[FlightInformation]:
     """
     Search round-trip flights and return normalized FlightInformation list.
@@ -354,19 +406,33 @@ def search_round_trip(
         _bounded_concurrency(len(to_airports), max_concurrency),
     )
 
+    if progress_id:
+        emit_progress(
+            progress_id,
+            "searching_flights",
+            f"Searching round-trip flights for {len(to_airports)} destination(s) from {from_airport}...",
+        )
+        if is_progress_cancelled(progress_id):
+            return []
+
     route_tasks = [
         {
             "label": f"{from_airport} <-> {to_airport} ({departure_date} / {return_date})",
-            "fn": lambda to_airport=to_airport: _search_round_trip_route(
+            "display_label": f"{from_airport} <-> {to_airport}",
+            "progress_id": progress_id,
+            "fn": lambda to_airport=to_airport, route_index=idx + 1, route_total=len(to_airports): _search_round_trip_route(
                 from_airport=from_airport,
                 to_airport=to_airport,
                 departure_date=departure_date,
                 return_date=return_date,
                 seat_class=seat_class,
                 passengers=passengers,
+                progress_id=progress_id,
+                route_index=route_index,
+                route_total=route_total,
             ),
         }
-        for to_airport in to_airports
+        for idx, to_airport in enumerate(to_airports)
     ]
 
     route_results = _collect_parallel_route_results(
@@ -402,6 +468,7 @@ def search_flights_node(state: AgentState) -> AgentState:
 
     try:
         trip = flight_query["trip"]
+        progress_id = state.get("progress_id")
 
         if not flight_query["from_airport"] or not flight_query["to_airports"]:
             return {
@@ -410,9 +477,9 @@ def search_flights_node(state: AgentState) -> AgentState:
             }
 
         if trip == "one_way":
-            flight_choices = search_one_way(flight_query)
+            flight_choices = search_one_way(flight_query, progress_id=progress_id)
         elif trip == "round_trip":
-            flight_choices = search_round_trip(flight_query)
+            flight_choices = search_round_trip(flight_query, progress_id=progress_id)
         else:
             return {
                 "flight_choices": None,

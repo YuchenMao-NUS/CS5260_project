@@ -47,6 +47,8 @@ class FlightInformation(TypedDict):
     
     
 class AgentState(TypedDict):
+    session_id: str                                # Session identifier for conversation memory
+    progress_id: Optional[str]                     # Request-scoped progress channel identifier
     user_input: str                                # Original user input
     user_context: dict                             # Context passed from frontend (e.g. timezone, location)
     flight_query: Optional[FlightQuery]            # Extracted search parameters

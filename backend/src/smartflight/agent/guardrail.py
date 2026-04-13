@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from openai import OpenAI
 from smartflight.agent.state import AgentState
 from smartflight.config import settings
+from smartflight.services.progress import emit_progress, raise_if_progress_cancelled
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,9 +16,17 @@ class IntentClassification(BaseModel):
 
 
 def intent_guardrail_node(state: AgentState) -> AgentState:
+    raise_if_progress_cancelled(state.get("progress_id"))
+
     api_key = settings.openai_api_key
     client = OpenAI(api_key=api_key) if api_key else None
-    
+    emit_progress(
+        state.get("progress_id"),
+        "analyzing_request",
+        "Checking whether your request is flight-related...",
+    )
+    raise_if_progress_cancelled(state.get("progress_id"))
+
     user_input = state["user_input"]
 
     system_prompt = """

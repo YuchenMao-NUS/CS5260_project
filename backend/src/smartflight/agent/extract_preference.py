@@ -3,6 +3,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 from smartflight.agent.state import AgentState
 from smartflight.config import settings
+from smartflight.services.progress import emit_progress, raise_if_progress_cancelled
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,11 +22,20 @@ class FlightPreferenceExtraction(BaseModel):
 
 
 def extract_preference_node(state: AgentState) -> AgentState:
+    raise_if_progress_cancelled(state.get("progress_id"))
+
     api_key = settings.openai_api_key
     client = OpenAI(api_key=api_key) if api_key else None
     if not client:
         raise ValueError("OPENAI_API_KEY not set")
-        
+
+    emit_progress(
+        state.get("progress_id"),
+        "analyzing_request",
+        "Identifying airline, price, stop, and duration preferences...",
+    )
+    raise_if_progress_cancelled(state.get("progress_id"))
+
     user_input = state["user_input"]
 
     # Retrieve historical preferences from the current state; if no such preferences exist, initialize them to an empty dictionary
@@ -85,16 +95,7 @@ Extraction rules:
 
     logger.info(f"[extract_preference] Updated Preferences: {merged_preference}")
 
-    flight_preference = {
-        "direct_only": extraction.direct_only,
-        "preferred_airlines": extraction.preferred_airlines,
-        "max_price": extraction.max_price,
-        "min_price": extraction.min_price,
-        "max_duration": extraction.max_duration,
-        "min_duration": extraction.min_duration,
-    }
-
     return {
         # **state,
-        "flight_preference": flight_preference,
+        "flight_preference": merged_preference,
     }

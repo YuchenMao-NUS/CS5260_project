@@ -6,6 +6,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 from smartflight.agent.state import AgentState
 from smartflight.config import settings
+from smartflight.services.progress import emit_progress, raise_if_progress_cancelled
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,19 @@ def _normalize_iata_codes(values: Optional[List[str]]) -> List[str]:
 
 
 def extract_query_node(state: AgentState) -> AgentState:
+    raise_if_progress_cancelled(state.get("progress_id"))
+
     api_key = settings.openai_api_key
     client = OpenAI(api_key=api_key) if api_key else None
     if not client:
         raise ValueError("OPENAI_API_KEY not set")
+
+    emit_progress(
+        state.get("progress_id"),
+        "analyzing_request",
+        "Extracting route, dates, passengers, and destination details...",
+    )
+    raise_if_progress_cancelled(state.get("progress_id"))
 
     today = datetime.now().strftime("%Y-%m-%d")
     weekday = datetime.now().strftime("%A")

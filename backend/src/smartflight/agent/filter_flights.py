@@ -7,6 +7,7 @@ from smartflight.agent.fast_flights import (
     create_query,
 )
 from smartflight.agent.fast_flights.browser_capture import fetch_booking_links_for_query
+from smartflight.services.progress import emit_progress, is_progress_cancelled
 
 import asyncio
 import logging
@@ -356,7 +357,15 @@ def _compute_rank_score(
     return score
 
 
-def _attach_booking_url(choice: FlightInformation, flight_query: FlightQuery) -> FlightInformation:
+def _attach_booking_url(
+    choice: FlightInformation,
+    flight_query: FlightQuery,
+    progress_id: str | None = None,
+    progress_label: str | None = None,
+) -> FlightInformation:
+    if is_progress_cancelled(progress_id):
+        return choice
+
     if choice.get("booking_url"):
         return choice
 
@@ -364,6 +373,13 @@ def _attach_booking_url(choice: FlightInformation, flight_query: FlightQuery) ->
     trip = choice["trip"]
     route_label = f"{choice['from_airport']} -> {choice['to_airport']}"
     booking_url = None
+
+    if progress_id and progress_label:
+        emit_progress(
+            progress_id,
+            "formatting_results",
+            f"Fetching booking link for {progress_label}...",
+        )
 
     if choice["trip"] == "one_way":
         booking_url = _fetch_one_way_booking_url(
@@ -409,6 +425,7 @@ def _attach_booking_urls_in_parallel(
     flight_query: FlightQuery,
     *,
     max_concurrency: int = DEFAULT_MAX_BOOKING_URL_FETCH_CONCURRENCY,
+    progress_id: str | None = None,
 ) -> list[FlightInformation]:
     if not choices:
         return choices
@@ -416,6 +433,7 @@ def _attach_booking_urls_in_parallel(
     started_at = perf_counter()
     ordered_choices: list[FlightInformation | None] = [None] * len(choices)
     worker_count = _bounded_concurrency(len(choices), max_concurrency)
+    completed_count = 0
 
     logger.info(
         "Starting parallel booking URL attachment: choices=%d, workers=%d",
@@ -425,7 +443,13 @@ def _attach_booking_urls_in_parallel(
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         future_to_index = {
-            executor.submit(_attach_booking_url, choice, flight_query): idx
+            executor.submit(
+                _attach_booking_url,
+                choice,
+                flight_query,
+                progress_id,
+                f"{choice['from_airport']} -> {choice['to_airport']}",
+            ): idx
             for idx, choice in enumerate(choices)
         }
 
@@ -435,6 +459,13 @@ def _attach_booking_urls_in_parallel(
             route_label = f"{choice['from_airport']} -> {choice['to_airport']}"
             try:
                 ordered_choices[idx] = future.result()
+                if progress_id:
+                    completed_count += 1
+                    emit_progress(
+                        progress_id,
+                        "formatting_results",
+                        f"Finished booking link check for {choice['from_airport']} -> {choice['to_airport']} ({completed_count}/{len(choices)})...",
+                    )
             except Exception as exc:
                 logger.warning(
                     "Booking URL attachment failed: trip=%s, route=%s, error=%s",
@@ -474,6 +505,7 @@ def filter_flights_node(state: AgentState) -> AgentState:
     flight_choices = state.get("flight_choices")
     flight_preference = state.get("flight_preference") or {}
     flight_query = state.get("flight_query") or {}
+    progress_id = state.get("progress_id")
     is_multi_destination = flight_query.get("is_multi_destination", False)
 
     if not flight_choices:
@@ -483,6 +515,12 @@ def filter_flights_node(state: AgentState) -> AgentState:
         }
 
     try:
+        emit_progress(
+            progress_id,
+            "formatting_results",
+            "Ranking and filtering flight results...",
+        )
+
         # Step 1: hard filtering
         filtered_choices = [
             choice
@@ -531,11 +569,17 @@ def filter_flights_node(state: AgentState) -> AgentState:
             )
 
         sorted_choices = sorted(filtered_choices, key=sort_key)
-        if flight_query:
+        if flight_query and not is_progress_cancelled(progress_id):
+            emit_progress(
+                progress_id,
+                "formatting_results",
+                f"Fetching booking links for {len(sorted_choices)} option(s)...",
+            )
             sorted_choices = _attach_booking_urls_in_parallel(
                 sorted_choices,
                 flight_query,
                 max_concurrency=DEFAULT_MAX_BOOKING_URL_FETCH_CONCURRENCY,
+                progress_id=progress_id,
             )
 
         # Step 4: if multi-destination, keep only the best option per destination

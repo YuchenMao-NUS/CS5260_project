@@ -2,7 +2,15 @@ import { useState, useRef, useEffect } from 'react'
 import { ChatMessage } from './components/ChatMessage'
 import './App.css'
 import type { FlightOption, FilterTag } from './types'
-import { sendChatMessage } from './api'
+import { sendChatMessageStream } from './api'
+
+function createSessionId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
 
 export default function App() {
   const [messages, setMessages] = useState<Array<{
@@ -13,10 +21,12 @@ export default function App() {
   }>>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null)
   const [activeTags, setActiveTags] = useState<FilterTag[]>([])
   const [userLocation, setUserLocation] = useState<string | undefined>(undefined)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const sessionIdRef = useRef(createSessionId())
 
   const filtersRef = useRef<HTMLDivElement>(null)
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -83,15 +93,21 @@ export default function App() {
     
     setMessages((prev) => [...prev, { role: 'user', content: finalMessageText }])
     setLoading(true)
+    setLoadingMessage('AI is analyzing your request...')
 
     try {
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-      const data = await sendChatMessage({ 
+      const data = await sendChatMessageStream({
         message: finalMessageText,
+        session_id: sessionIdRef.current,
         context: { 
           timeZone,
           location: userLocation
         }
+      }, {
+        onProgress: (event) => {
+          setLoadingMessage(event.message)
+        },
       })
       setMessages((prev) => [
         ...prev,
@@ -112,6 +128,7 @@ export default function App() {
       ])
     } finally {
       setLoading(false)
+      setLoadingMessage(null)
     }
   }
 
@@ -143,7 +160,7 @@ export default function App() {
           ))}
           {loading && (
             <div className="message assistant">
-              <div className="bubble">Searching flights...</div>
+              <div className="bubble">{loadingMessage || 'Searching flights...'}</div>
             </div>
           )}
           <div ref={messagesEndRef} />

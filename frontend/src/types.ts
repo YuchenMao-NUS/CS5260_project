@@ -17,6 +17,7 @@ export interface FlightOption {
 
 export interface ChatRequest {
   message: string
+  session_id?: string
   context?: {
     timeZone?: string
     location?: string
@@ -33,4 +34,16 @@ export interface ChatResponse {
   flights: FlightOption[] | null
   description_of_recommendation?: string | null
   intent?: Record<string, unknown>
+}
+
+export type ChatProgressStage =
+  | 'analyzing_request'
+  | 'searching_flights'
+  | 'formatting_results'
+  | 'generating_summary'
+
+export interface ChatProgressEvent {
+  type: 'progress'
+  stage: ChatProgressStage
+  message: string
 }
