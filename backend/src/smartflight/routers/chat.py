@@ -52,6 +52,8 @@ class FlightLeg(BaseModel):
     duration: str
     duration_minutes: int
     stops: str
+    stopCount: int
+    stopAirports: list[str]
 
 
 class FlightOption(BaseModel):

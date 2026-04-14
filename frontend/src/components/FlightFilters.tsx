@@ -12,7 +12,8 @@ interface FlightFiltersProps {
   onToggleTag?: (tag: FilterTag, isActive: boolean) => void
 }
 
-function getStopsCount(stops: string): number {
+function getStopsCount(stopCount: number | undefined, stops: string): number {
+  if (typeof stopCount === 'number') return stopCount
   if (/direct/i.test(stops)) return 0
   const m = stops.match(/^(\d+)\s*stop/)
   return m ? parseInt(m[1], 10) : 1
@@ -72,7 +73,7 @@ export function FlightFilters({ flights, content, onToggleTag }: FlightFiltersPr
   const filteredAndSorted = useMemo(() => {
     let result = flights.filter((f) => {
       // If any leg doesn't meet the stop criteria, filter out the flight
-      const maxStops = Math.max(...f.legs.map(l => getStopsCount(l.stops)))
+      const maxStops = Math.max(...f.legs.map(l => getStopsCount(l.stopCount, l.stops)))
       if (stopsFilter === 'direct' && maxStops !== 0) return false
       if (stopsFilter === '1' && maxStops !== 1) return false
       if (stopsFilter === '2+' && maxStops < 2) return false

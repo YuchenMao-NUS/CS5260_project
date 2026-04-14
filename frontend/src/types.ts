@@ -5,6 +5,8 @@ export interface FlightLeg {
   duration: string
   duration_minutes: number
   stops: string
+  stopCount: number
+  stopAirports: string[]
 }
 
 export interface FlightOption {

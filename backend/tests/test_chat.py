@@ -11,6 +11,7 @@ from smartflight.main import app
 from smartflight.routers import chat as chat_router
 from smartflight.services import nlu as nlu_service
 from smartflight.services import progress as progress_service
+from smartflight.services.chat_formatting import format_demo_flight, format_graph_flight
 
 client = TestClient(app)
 
@@ -423,3 +424,94 @@ def test_progress_helpers_stop_emitting_after_cancellation():
         assert queue.empty()
     finally:
         progress_service.unregister_progress_queue(session_id)
+
+def test_format_graph_flight_preserves_stop_airports():
+    """Graph flight formatting should keep layover airports in the response."""
+    outbound_segments = [
+        SimpleNamespace(
+            from_airport=SimpleNamespace(code="SIN"),
+            to_airport=SimpleNamespace(code="HKG"),
+            departure=SimpleNamespace(date=(2026, 3, 14), time=(8, 0)),
+            arrival=SimpleNamespace(date=(2026, 3, 14), time=(12, 0)),
+            duration=240,
+            flight_number="CX700",
+            flight_number_airline_code="CX",
+        ),
+        SimpleNamespace(
+            from_airport=SimpleNamespace(code="HKG"),
+            to_airport=SimpleNamespace(code="NRT"),
+            departure=SimpleNamespace(date=(2026, 3, 14), time=(13, 30)),
+            arrival=SimpleNamespace(date=(2026, 3, 14), time=(18, 10)),
+            duration=280,
+            flight_number="CX520",
+            flight_number_airline_code="CX",
+        ),
+    ]
+
+    formatted = format_graph_flight(
+        {
+            "trip": "one_way",
+            "price": 385.0,
+            "duration": 520,
+            "airlines": ["CX"],
+            "flights": outbound_segments,
+        },
+        1,
+    )
+
+    leg = formatted["legs"][0]
+    assert leg["stops"] == "1 stop (HKG)"
+    assert leg["stopCount"] == 1
+    assert leg["stopAirports"] == ["HKG"]
+
+
+def test_format_demo_flight_derives_structured_stop_fields():
+    """Demo flights should expose the same structured stop data as live results."""
+    formatted = format_demo_flight(
+        {
+            "id": "demo-2",
+            "price": 385.0,
+            "legs": [
+                {
+                    "airlineCode": "CX",
+                    "departure": "SIN 14:20",
+                    "arrival": "NRT 21:45",
+                    "duration": "6h 25m",
+                    "duration_minutes": 385,
+                    "stops": "1 stop (HKG)",
+                }
+            ],
+        }
+    )
+
+    leg = formatted["legs"][0]
+    assert leg["stopCount"] == 1
+    assert leg["stopAirports"] == ["HKG"]
+    assert leg["stops"] == "1 stop (HKG)"
+
+def test_format_demo_flight_prefers_structured_stop_fields_over_legacy_label():
+    """Demo leg normalization should not keep conflicting legacy and structured stop data."""
+    formatted = format_demo_flight(
+        {
+            "id": "demo-conflict",
+            "price": 500.0,
+            "legs": [
+                {
+                    "airlineCode": "CX",
+                    "departure": "SIN 14:20",
+                    "arrival": "NRT 21:45",
+                    "duration": "9h 40m",
+                    "duration_minutes": 580,
+                    "stops": "1 stop (HKG)",
+                    "stopCount": 2,
+                    "stopAirports": ["KUL", "BKK"],
+                }
+            ],
+        }
+    )
+
+    leg = formatted["legs"][0]
+    assert leg["stopCount"] == 2
+    assert leg["stopAirports"] == ["KUL", "BKK"]
+    assert leg["stops"] == "2 stops (KUL, BKK)"
+
