@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { ChatMessage } from './components/ChatMessage'
 import './App.css'
-import type { FlightOption, FilterTag } from './types'
+import type { ChatProgressStage, FlightOption, FilterTag } from './types'
 import { sendChatMessageStream } from './api'
 
 function createSessionId() {
@@ -10,6 +10,34 @@ function createSessionId() {
   }
 
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function formatLoadingTitle(message: string | null) {
+  const base = (message || 'Searching flights').trim()
+  return base.replace(/(\.\.\.|…)+\s*$/, '')
+}
+
+const STAGE_SUBTEXT: Record<ChatProgressStage, string> = {
+  analyzing_request: 'Understanding your request before we look for flights.',
+  searching_flights: 'Checking live route combinations and available options.',
+  formatting_results: 'Attaching booking links and preparing the results.',
+  generating_summary: 'Writing a short recommendation based on what was found.',
+}
+
+function getLoadingSubtext(stage: ChatProgressStage | null, elapsedSeconds: number) {
+  if (elapsedSeconds >= 12) {
+    return 'Still working. Live flight lookups and booking links can take a little longer.'
+  }
+
+  if (elapsedSeconds >= 6) {
+    return 'Still working. The request is active and more updates should appear soon.'
+  }
+
+  if (stage && STAGE_SUBTEXT[stage]) {
+    return STAGE_SUBTEXT[stage]
+  }
+
+  return 'Preparing your request...'
 }
 
 export default function App() {
@@ -22,6 +50,8 @@ export default function App() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null)
+  const [loadingStage, setLoadingStage] = useState<ChatProgressStage | null>(null)
+  const [loadingElapsedSeconds, setLoadingElapsedSeconds] = useState(0)
   const [activeTags, setActiveTags] = useState<FilterTag[]>([])
   const [userLocation, setUserLocation] = useState<string | undefined>(undefined)
   
@@ -53,6 +83,23 @@ export default function App() {
       scrollToBottom()
     }
   }, [messages])
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingElapsedSeconds(0)
+      return
+    }
+
+    setLoadingElapsedSeconds(0)
+    // Only fire at the two subtext threshold boundaries to avoid unnecessary re-renders
+    const t1 = window.setTimeout(() => setLoadingElapsedSeconds(6), 6_000)
+    const t2 = window.setTimeout(() => setLoadingElapsedSeconds(12), 12_000)
+
+    return () => {
+      window.clearTimeout(t1)
+      window.clearTimeout(t2)
+    }
+  }, [loading])
 
   const handleToggleTag = (tag: FilterTag, isActive: boolean) => {
     setActiveTags(prev => {
@@ -107,6 +154,7 @@ export default function App() {
       }, {
         onProgress: (event) => {
           setLoadingMessage(event.message)
+          setLoadingStage(event.stage)
         },
       })
       setMessages((prev) => [
@@ -129,6 +177,7 @@ export default function App() {
     } finally {
       setLoading(false)
       setLoadingMessage(null)
+      setLoadingStage(null)
     }
   }
 
@@ -160,7 +209,19 @@ export default function App() {
           ))}
           {loading && (
             <div className="message assistant">
-              <div className="bubble">{loadingMessage || 'Searching flights...'}</div>
+              <div className="bubble loading-bubble" aria-live="polite">
+                <div className="loading-line">
+                  <span className="loading-text">{formatLoadingTitle(loadingMessage)}</span>
+                  <span className="loading-dots" aria-hidden="true">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </span>
+                </div>
+                <div className="loading-subtext">
+                  {getLoadingSubtext(loadingStage, loadingElapsedSeconds)}
+                </div>
+              </div>
             </div>
           )}
           <div ref={messagesEndRef} />
