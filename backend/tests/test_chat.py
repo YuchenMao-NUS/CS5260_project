@@ -17,6 +17,17 @@ from smartflight.services.chat_formatting import format_demo_flight, format_grap
 client = TestClient(app)
 
 
+def _mock_chat_request_sync(monkeypatch, response: chat_router.ChatResponse) -> None:
+    """Stub the synchronous chat pipeline for HTTP-layer unit tests."""
+
+    def fake_run_chat_request_sync(message, user_context, session_id, progress_id=None, on_event=None):
+        if on_event:
+            on_event({"type": "completed", "data": response})
+        return response
+
+    monkeypatch.setattr(chat_router, "_run_chat_request_sync", fake_run_chat_request_sync)
+
+
 def test_health_check():
     """Health endpoint returns ok."""
     resp = client.get("/health")
@@ -24,8 +35,26 @@ def test_health_check():
     assert resp.json()["status"] == "ok"
 
 
-def test_chat_returns_intent():
-    """Chat endpoint parses intent and returns reply."""
+def test_chat_returns_intent(monkeypatch):
+    """Chat endpoint returns the mocked parsed intent payload."""
+    _mock_chat_request_sync(
+        monkeypatch,
+        chat_router.ChatResponse(
+            reply="Found 1 flight option(s) from SIN to TYO. See details below.",
+            flights=None,
+            description_of_recommendation="Mocked summary",
+            intent={
+                "flight_query": {
+                    "from_airport": "SIN",
+                    "to_airports": ["TYO"],
+                    "trip": "one_way",
+                },
+                "flight_preference": {},
+                "error_message": None,
+            },
+        ),
+    )
+
     resp = client.post("/api/chat", json={"message": "Singapore to Tokyo"})
     assert resp.status_code == 200
     data = resp.json()
@@ -34,8 +63,27 @@ def test_chat_returns_intent():
     assert any(airport in data["intent"]["flight_query"]["to_airports"] for airport in ["TYO", "HND", "NRT"])
 
 
-def test_chat_round_trip():
-    """Chat endpoint correctly parses a round-trip query."""
+def test_chat_round_trip(monkeypatch):
+    """Chat endpoint returns a mocked round-trip intent."""
+    _mock_chat_request_sync(
+        monkeypatch,
+        chat_router.ChatResponse(
+            reply="Found 2 flight option(s) from SIN to LON on 2026-04-22 (returning 2026-04-29). See details below.",
+            flights=None,
+            description_of_recommendation="Mocked summary",
+            intent={
+                "flight_query": {
+                    "from_airport": "SIN",
+                    "to_airports": ["LON"],
+                    "trip": "round_trip",
+                    "return_date": "2026-04-29",
+                },
+                "flight_preference": {},
+                "error_message": None,
+            },
+        ),
+    )
+
     resp = client.post("/api/chat", json={"message": "Round trip from Singapore to London next week"})
     assert resp.status_code == 200
     data = resp.json()
@@ -43,11 +91,29 @@ def test_chat_round_trip():
     assert query.get("trip") == "round_trip"
     assert query.get("from_airport") == "SIN"
     assert any(airport in query.get("to_airports", []) for airport in ["LHR", "LGW", "LON", "STN"])
-    assert query.get("return_date") is not None
+    assert query.get("return_date") == "2026-04-29"
 
 
-def test_chat_with_context():
-    """Chat endpoint correctly infers origin from context when omitted."""
+def test_chat_with_context(monkeypatch):
+    """Chat endpoint uses a mocked response for context-based inference."""
+    _mock_chat_request_sync(
+        monkeypatch,
+        chat_router.ChatResponse(
+            reply="Found 1 flight option(s) from SIN to TYO. See details below.",
+            flights=None,
+            description_of_recommendation="Mocked summary",
+            intent={
+                "flight_query": {
+                    "from_airport": "SIN",
+                    "to_airports": ["TYO"],
+                    "trip": "one_way",
+                },
+                "flight_preference": {},
+                "error_message": None,
+            },
+        ),
+    )
+
     resp = client.post(
         "/api/chat", 
         json={
@@ -66,8 +132,22 @@ def test_chat_with_context():
     assert any(airport in query.get("to_airports", []) for airport in ["TYO", "HND", "NRT"])
 
 
-def test_chat_same_origin_destination():
-    """Chat endpoint handles identical origin and destination."""
+def test_chat_same_origin_destination(monkeypatch):
+    """Chat endpoint returns a mocked validation error for invalid routes."""
+    _mock_chat_request_sync(
+        monkeypatch,
+        chat_router.ChatResponse(
+            reply="Your origin and destination both seem to be SIN. Please specify a different destination.",
+            flights=None,
+            description_of_recommendation=None,
+            intent={
+                "flight_query": None,
+                "flight_preference": {},
+                "error_message": "Your origin and destination both seem to be SIN. Please specify a different destination.",
+            },
+        ),
+    )
+
     resp = client.post(
         "/api/chat", 
         json={
