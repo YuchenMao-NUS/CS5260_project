@@ -521,7 +521,7 @@ def filter_flights_node(state: AgentState) -> AgentState:
 
     if not flight_choices:
         return {
-            # **state,
+            "flight_choices": [],
             "error_message": None,
         }
 

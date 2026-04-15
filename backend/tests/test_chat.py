@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from smartflight.agent import extract_preference as extract_preference_module
 from smartflight.agent import extract_query as extract_query_module
+from smartflight.agent import filter_flights as filter_flights_module
 from smartflight.main import app
 from smartflight.routers import chat as chat_router
 from smartflight.services import nlu as nlu_service
@@ -286,6 +287,66 @@ def test_run_flight_search_fallback_uses_context_and_previous_state(monkeypatch)
     assert result["flight_preference"]["max_price"] == 500.0
 
 
+def test_run_flight_search_seeds_graph_with_checkpointed_memory(monkeypatch):
+    """Successful graph invocations should receive prior query and preference state."""
+
+    previous_state = {
+        "flight_query": {
+            "from_airport": "SIN",
+            "to_airports": ["TYO"],
+            "trip": "one_way",
+            "departure_date": "2026-05-01",
+            "return_date": None,
+            "seat_classes": "economy",
+            "passengers": 1,
+            "is_multi_destination": False,
+            "description_of_recommendation": None,
+        },
+        "flight_preference": {
+            "preferred_airlines": ["SQ"],
+            "direct_only": True,
+        },
+        "flight_choices": [{"to_airport": "TYO"}],
+        "error_message": "old error",
+    }
+
+    captured_input_state: dict | None = None
+
+    def fake_get_state(config):
+        assert config["configurable"]["thread_id"] == "memory-session"
+        return SimpleNamespace(values=previous_state)
+
+    def fake_invoke(input_state, config=None):
+        nonlocal captured_input_state
+        captured_input_state = input_state
+        return {
+            "user_input": input_state["user_input"],
+            "flight_query": input_state["flight_query"],
+            "flight_preference": input_state["flight_preference"],
+            "error_message": input_state["error_message"],
+            "flight_choices": input_state["flight_choices"],
+        }
+
+    monkeypatch.setattr(nlu_service.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(nlu_service.graph, "get_state", fake_get_state)
+    monkeypatch.setattr(nlu_service.graph, "invoke", fake_invoke)
+
+    result = nlu_service.run_flight_search(
+        "also keep it under 500",
+        user_context={"location": "Singapore, Singapore"},
+        session_id="memory-session",
+        progress_id="progress-1",
+    )
+
+    assert captured_input_state is not None
+    assert captured_input_state["flight_query"] == previous_state["flight_query"]
+    assert captured_input_state["flight_preference"] == previous_state["flight_preference"]
+    assert captured_input_state["flight_choices"] is None
+    assert captured_input_state["error_message"] is None
+    assert result["flight_query"] == previous_state["flight_query"]
+    assert result["flight_preference"] == previous_state["flight_preference"]
+
+
 def test_run_flight_search_fallback_survives_state_lookup_failure(monkeypatch):
     """Fallback should still work when previous-state lookup fails."""
 
@@ -381,6 +442,36 @@ def test_extract_preference_merges_with_existing_state(monkeypatch):
     assert result["flight_preference"]["preferred_airlines"] == ["SQ"]
     assert result["flight_preference"]["direct_only"] is True
     assert result["flight_preference"]["max_price"] == 500.0
+
+
+def test_filter_flights_clears_stale_choices_when_search_returns_none():
+    """Empty search results should clear any checkpointed flight choices."""
+
+    result = filter_flights_module.filter_flights_node(
+        {
+            "session_id": "chat-session",
+            "progress_id": None,
+            "user_input": "Tokyo please",
+            "user_context": {},
+            "flight_query": {
+                "trip": "one_way",
+                "from_airport": "SIN",
+                "to_airports": ["TYO"],
+                "departure_date": "2026-05-01",
+                "return_date": None,
+                "seat_classes": "economy",
+                "passengers": 1,
+                "is_multi_destination": False,
+                "description_of_recommendation": None,
+            },
+            "flight_preference": {},
+            "flight_choices": None,
+            "error_message": None,
+        }
+    )
+
+    assert result["flight_choices"] == []
+    assert result["error_message"] is None
 
 
 def test_extract_query_skips_openai_when_progress_cancelled(monkeypatch):

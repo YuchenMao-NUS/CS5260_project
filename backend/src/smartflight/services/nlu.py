@@ -47,14 +47,16 @@ def _build_input_state(
     user_context: dict | None,
     session_id: str,
     progress_id: str | None,
+    previous_state: dict | None = None,
 ) -> dict:
+    previous_state = previous_state or {}
     return {
         "session_id": session_id,
         "progress_id": progress_id,
         "user_input": message,
         "user_context": user_context or {},
-        "flight_query": None,
-        "flight_preference": None,
+        "flight_query": previous_state.get("flight_query"),
+        "flight_preference": previous_state.get("flight_preference"),
         "error_message": None,
         "flight_choices": None,
     }
@@ -241,8 +243,14 @@ def run_flight_search(
     Run the full flight agent pipeline and return the graph state.
     """
     resolved_session_id = _resolve_session_id(session_id)
-    input_state = _build_input_state(message, user_context, resolved_session_id, progress_id)
     previous_state = _safe_get_previous_state(resolved_session_id)
+    input_state = _build_input_state(
+        message,
+        user_context,
+        resolved_session_id,
+        progress_id,
+        previous_state,
+    )
 
     try:
         if not settings.openai_enabled:
