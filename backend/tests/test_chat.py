@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from smartflight.agent import agent as agent_module
 from smartflight.agent import extract_preference as extract_preference_module
 from smartflight.agent import extract_query as extract_query_module
 from smartflight.agent import filter_flights as filter_flights_module
@@ -15,6 +16,23 @@ from smartflight.services import progress as progress_service
 from smartflight.services.chat_formatting import format_demo_flight, format_graph_flight
 
 client = TestClient(app)
+
+
+def test_graph_memory_allows_fast_flights_msgpack_types():
+    """Checkpoint serde should explicitly allow fast-flight dataclass deserialization."""
+
+    allowed_types = getattr(agent_module.memory.serde, "_allowed_msgpack_modules", set())
+    expected_types = {
+        ("smartflight.agent.fast_flights.model", "Airline"),
+        ("smartflight.agent.fast_flights.model", "Alliance"),
+        ("smartflight.agent.fast_flights.model", "JsMetadata"),
+        ("smartflight.agent.fast_flights.model", "Airport"),
+        ("smartflight.agent.fast_flights.model", "SimpleDatetime"),
+        ("smartflight.agent.fast_flights.model", "SingleFlight"),
+        ("smartflight.agent.fast_flights.model", "CarbonEmission"),
+        ("smartflight.agent.fast_flights.model", "Flights"),
+    }
+    assert expected_types.issubset(allowed_types)
 
 
 def _mock_chat_request_sync(monkeypatch, response: chat_router.ChatResponse) -> None:

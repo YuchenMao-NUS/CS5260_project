@@ -6,6 +6,7 @@ from smartflight.agent.extract_preference import extract_preference_node
 from smartflight.agent.search_flights import search_flights_node
 from smartflight.agent.filter_flights import filter_flights_node
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 import logging
 # 普通日志（带时间等）
@@ -84,7 +85,20 @@ builder.add_edge("search_flights", "filter_flights")
 builder.add_edge("filter_flights", END)
 
 # Initialize memory manager
-memory = MemorySaver()
+memory = MemorySaver(
+    serde=JsonPlusSerializer(
+        allowed_msgpack_modules=[
+            ("smartflight.agent.fast_flights.model", "Airline"),
+            ("smartflight.agent.fast_flights.model", "Alliance"),
+            ("smartflight.agent.fast_flights.model", "JsMetadata"),
+            ("smartflight.agent.fast_flights.model", "Airport"),
+            ("smartflight.agent.fast_flights.model", "SimpleDatetime"),
+            ("smartflight.agent.fast_flights.model", "SingleFlight"),
+            ("smartflight.agent.fast_flights.model", "CarbonEmission"),
+            ("smartflight.agent.fast_flights.model", "Flights"),
+        ]
+    )
+)
 # Inject memory into the compiled graph
 graph = builder.compile(checkpointer=memory)
 
