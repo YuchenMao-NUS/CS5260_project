@@ -28,7 +28,7 @@ result_logger.addHandler(handler)
 result_logger.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_BOOKING_URL_FETCH_CONCURRENCY = 2
+DEFAULT_MAX_BOOKING_URL_FETCH_CONCURRENCY = 5
 
 
 def _get_seat(seat_class: str) -> str:
@@ -487,6 +487,17 @@ def _attach_booking_urls_in_parallel(
     return attached_choices
 
 
+def _keep_best_option_per_destination(
+    choices: list[FlightInformation],
+) -> list[FlightInformation]:
+    best_by_destination: dict[str, FlightInformation] = {}
+    for choice in choices:
+        to_airport = choice["to_airport"]
+        if to_airport not in best_by_destination:
+            best_by_destination[to_airport] = choice
+    return list(best_by_destination.values())
+
+
 def filter_flights_node(state: AgentState) -> AgentState:
     """
     Filter and sort flight_choices using flight_preference.
@@ -569,6 +580,13 @@ def filter_flights_node(state: AgentState) -> AgentState:
             )
 
         sorted_choices = sorted(filtered_choices, key=sort_key)
+
+        # For destination recommendation flows, keep the top-ranked option per
+        # destination before fetching booking URLs so we only fetch links for
+        # the final shortlisted results.
+        if is_multi_destination:
+            sorted_choices = _keep_best_option_per_destination(sorted_choices)
+
         if flight_query and not is_progress_cancelled(progress_id):
             emit_progress(
                 progress_id,
@@ -581,16 +599,6 @@ def filter_flights_node(state: AgentState) -> AgentState:
                 max_concurrency=DEFAULT_MAX_BOOKING_URL_FETCH_CONCURRENCY,
                 progress_id=progress_id,
             )
-
-        # Step 4: if multi-destination, keep only the best option per destination
-        if is_multi_destination:
-            best_by_destination: dict[str, FlightInformation] = {}
-            for choice in sorted_choices:
-                to_airport = choice["to_airport"]
-                if to_airport not in best_by_destination:
-                    best_by_destination[to_airport] = choice
-
-            sorted_choices = list(best_by_destination.values())
 
         result = {
             **state,
