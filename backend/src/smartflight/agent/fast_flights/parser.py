@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta
 
 from selectolax.lexbor import LexborHTMLParser
 
@@ -38,6 +39,75 @@ def _safe_get(obj, *idxs, default=None):
 
 def _as_list(x):
     return x if isinstance(x, list) else []
+
+
+def _normalize_date(value):
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        return None
+    year, month, day = value
+    if None in (year, month, day):
+        return None
+    try:
+        return (int(year), int(month), int(day))
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_time(value):
+    if not isinstance(value, (list, tuple)) or not value:
+        return None
+
+    hour = value[0]
+    minute = value[1] if len(value) > 1 else 0
+
+    # Google Flights occasionally omits the hour for shortly-after-midnight times.
+    if hour is None and minute is not None:
+        hour = 0
+    if minute is None:
+        minute = 0
+
+    if hour is None:
+        return None
+
+    try:
+        return (int(hour), int(minute))
+    except (TypeError, ValueError):
+        return None
+
+
+def _derive_time_from_duration(base_date, base_time, target_date, duration_minutes):
+    normalized_base_date = _normalize_date(base_date)
+    normalized_base_time = _normalize_time(base_time)
+    normalized_target_date = _normalize_date(target_date)
+
+    if (
+        normalized_base_date is None
+        or normalized_base_time is None
+        or normalized_target_date is None
+        or duration_minutes is None
+    ):
+        return None
+
+    try:
+        base_dt = datetime(
+            normalized_base_date[0],
+            normalized_base_date[1],
+            normalized_base_date[2],
+            normalized_base_time[0],
+            normalized_base_time[1],
+        )
+        target_dt = base_dt + timedelta(minutes=int(duration_minutes))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    if target_dt.date() != datetime(
+        normalized_target_date[0],
+        normalized_target_date[1],
+        normalized_target_date[2],
+    ).date():
+        return None
+
+    return (target_dt.hour, target_dt.minute)
 
 
 def _get_rows(payload: list, *, use_payload3: bool) -> list:
@@ -149,6 +219,16 @@ def parse_js(js: str, *, use_payload3: bool = False):
 
                     duration = _safe_get(single_flight, 11)
                     plane_type = _safe_get(single_flight, 17, default="")
+
+                    departure_date = _normalize_date(departure_date)
+                    arrival_date = _normalize_date(arrival_date)
+                    departure_time = _normalize_time(departure_time)
+                    arrival_time = _normalize_time(arrival_time) or _derive_time_from_duration(
+                        departure_date,
+                        departure_time,
+                        arrival_date,
+                        duration,
+                    )
 
                     # Key fields missing -> skip this leg
                     if not (from_code and from_name and to_code and to_name):
