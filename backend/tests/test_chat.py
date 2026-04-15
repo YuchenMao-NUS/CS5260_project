@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from smartflight.agent import agent as agent_module
 from smartflight.agent import extract_preference as extract_preference_module
@@ -11,6 +12,7 @@ from smartflight.agent import extract_query as extract_query_module
 from smartflight.agent import filter_flights as filter_flights_module
 from smartflight.main import app
 from smartflight.routers import chat as chat_router
+from smartflight.services import booking as booking_service
 from smartflight.services import nlu as nlu_service
 from smartflight.services import progress as progress_service
 from smartflight.services.chat_formatting import format_demo_flight, format_graph_flight
@@ -492,6 +494,180 @@ def test_chat_demo_uses_fallback_query_without_short_circuit(monkeypatch):
     data = resp.json()
     assert data["reply"].startswith("Found ")
     assert data["flights"]
+
+
+def test_chat_live_results_do_not_eagerly_include_booking_urls(monkeypatch):
+    """Live results should defer booking-link resolution until the Book button is clicked."""
+
+    def fake_run_flight_search(message, user_context=None, session_id=None, progress_id=None):
+        return {
+            "user_input": message,
+            "flight_query": {
+                "from_airport": "SIN",
+                "to_airports": ["TYO"],
+                "departure_date": "2026-04-15",
+                "return_date": None,
+                "passengers": 1,
+                "seat_classes": "economy",
+                "trip": "one_way",
+            },
+            "flight_preference": {},
+            "error_message": None,
+            "flight_choices": [
+                {
+                    "trip": "one_way",
+                    "from_airport": "SIN",
+                    "to_airport": "TYO",
+                    "departure_date": "2026-04-15",
+                    "return_date": None,
+                    "booking_url": None,
+                    "tfu_token": None,
+                    "is_direct": True,
+                    "airlines": ["SQ"],
+                    "price": 420.0,
+                    "duration": 430,
+                    "flights": [
+                        SimpleNamespace(
+                            from_airport=SimpleNamespace(code="SIN"),
+                            to_airport=SimpleNamespace(code="TYO"),
+                            departure=SimpleNamespace(date=(2026, 4, 15), time=(8, 0)),
+                            arrival=SimpleNamespace(date=(2026, 4, 15), time=(16, 0)),
+                            duration=430,
+                            flight_number="SQ12",
+                            flight_number_airline_code="SQ",
+                        )
+                    ],
+                    "is_direct_2": None,
+                    "airlines_2": None,
+                    "price_2": None,
+                    "duration_2": None,
+                    "flights_2": None,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(chat_router, "run_flight_search", fake_run_flight_search)
+
+    resp = client.post("/api/chat", json={"message": "Singapore to Tokyo", "session_id": "live-no-booking"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["flights"][0]["id"] == "result-1"
+    assert data["flights"][0]["bookingUrl"] is None
+
+
+def test_booking_url_endpoint_returns_lazy_booking_url(monkeypatch):
+    """The booking-url endpoint should return the resolved URL for a valid session and flight."""
+
+    monkeypatch.setattr(
+        chat_router,
+        "resolve_booking_url",
+        lambda session_id, result_set_id, flight_id: "https://booking.example/flight",
+    )
+
+    resp = client.post(
+        "/api/chat/booking-url",
+        json={
+            "session_id": "booking-session",
+            "result_set_id": "result-set-1",
+            "flight_id": "result-1",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"bookingUrl": "https://booking.example/flight"}
+
+
+def test_booking_url_endpoint_propagates_not_found(monkeypatch):
+    """Unknown sessions or flights should surface as normal HTTP errors."""
+
+    def fake_resolve_booking_url(session_id, result_set_id, flight_id):
+        raise HTTPException(status_code=404, detail="Flight not found in this response.")
+
+    monkeypatch.setattr(chat_router, "resolve_booking_url", fake_resolve_booking_url)
+
+    resp = client.post(
+        "/api/chat/booking-url",
+        json={
+            "session_id": "missing-session",
+            "result_set_id": "result-set-404",
+            "flight_id": "result-99",
+        },
+    )
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Flight not found in this response."
+
+
+def test_resolve_booking_url_maps_flight_id_within_saved_result_set(monkeypatch):
+    """Flight ids should resolve against the specific saved response payload."""
+
+    captured: dict | None = None
+
+    def fake_fetch_booking_url_for_choice(choice, flight_query):
+        nonlocal captured
+        captured = {"choice": choice, "flight_query": flight_query}
+        return "https://booking.example/selected"
+
+    monkeypatch.setattr(booking_service, "fetch_booking_url_for_choice", fake_fetch_booking_url_for_choice)
+    booking_service.store_result_set(
+        "mapping-session",
+        "result-set-1",
+        {
+            "trip": "one_way",
+            "from_airport": "SIN",
+            "to_airports": ["TYO"],
+            "departure_date": "2026-05-01",
+            "return_date": None,
+            "seat_classes": "economy",
+            "passengers": 1,
+            "is_multi_destination": False,
+            "description_of_recommendation": None,
+        },
+        flight_choices=[
+            {"from_airport": "SIN", "to_airport": "LON", "trip": "one_way"},
+            {"from_airport": "SIN", "to_airport": "TYO", "trip": "one_way"},
+        ],
+    )
+
+    booking_url = booking_service.resolve_booking_url("mapping-session", "result-set-1", "result-2")
+
+    assert booking_url == "https://booking.example/selected"
+    assert captured is not None
+    assert captured["choice"]["to_airport"] == "TYO"
+    assert captured["flight_query"]["from_airport"] == "SIN"
+
+
+def test_resolve_booking_url_keeps_older_result_sets_addressable(monkeypatch):
+    """Older chat messages should continue resolving against their own saved result set."""
+
+    seen_destinations: list[str] = []
+
+    def fake_fetch_booking_url_for_choice(choice, flight_query):
+        seen_destinations.append(choice["to_airport"])
+        return f"https://booking.example/{choice['to_airport'].lower()}"
+
+    monkeypatch.setattr(booking_service, "fetch_booking_url_for_choice", fake_fetch_booking_url_for_choice)
+
+    booking_service.store_result_set(
+        "history-session",
+        "older-results",
+        {"from_airport": "SIN", "to_airports": ["TYO"], "trip": "one_way"},
+        flight_choices=[{"from_airport": "SIN", "to_airport": "TYO", "trip": "one_way"}],
+    )
+    booking_service.store_result_set(
+        "history-session",
+        "newer-results",
+        {"from_airport": "SIN", "to_airports": ["LON"], "trip": "one_way"},
+        flight_choices=[{"from_airport": "SIN", "to_airport": "LON", "trip": "one_way"}],
+    )
+
+    older_url = booking_service.resolve_booking_url("history-session", "older-results", "result-1")
+    newer_url = booking_service.resolve_booking_url("history-session", "newer-results", "result-1")
+
+    assert older_url == "https://booking.example/tyo"
+    assert newer_url == "https://booking.example/lon"
+    assert seen_destinations == ["TYO", "LON"]
 
 
 def test_extract_preference_merges_with_existing_state(monkeypatch):

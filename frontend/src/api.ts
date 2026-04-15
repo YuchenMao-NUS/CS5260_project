@@ -1,4 +1,4 @@
-import type { ChatProgressEvent, ChatRequest, ChatResponse } from './types'
+import type { BookingUrlRequest, BookingUrlResponse, ChatProgressEvent, ChatRequest, ChatResponse } from './types'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
@@ -19,6 +19,21 @@ export async function sendChatMessage(payload: ChatRequest): Promise<ChatRespons
   }
 
   return response.json() as Promise<ChatResponse>
+}
+
+export async function fetchBookingUrl(payload: BookingUrlRequest): Promise<BookingUrlResponse> {
+  const response = await fetch(`${API_BASE}/api/chat/booking-url`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const errorMessage = await getErrorMessage(response)
+    throw new Error(errorMessage)
+  }
+
+  return response.json() as Promise<BookingUrlResponse>
 }
 
 interface ChatStreamHandlers {

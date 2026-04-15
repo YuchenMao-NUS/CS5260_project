@@ -17,6 +17,16 @@ export interface FlightOption {
   bookingUrl?: string
 }
 
+export interface BookingUrlRequest {
+  session_id: string
+  result_set_id: string
+  flight_id: string
+}
+
+export interface BookingUrlResponse {
+  bookingUrl: string
+}
+
 export interface ChatRequest {
   message: string
   session_id?: string
@@ -34,6 +44,7 @@ export interface FilterTag {
 export interface ChatResponse {
   reply: string
   flights: FlightOption[] | null
+  resultSetId?: string | null
   description_of_recommendation?: string | null
   intent?: Record<string, unknown>
 }

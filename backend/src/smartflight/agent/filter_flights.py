@@ -416,6 +416,14 @@ def _attach_booking_url(
     }
 
 
+def fetch_booking_url_for_choice(
+    choice: FlightInformation,
+    flight_query: FlightQuery,
+) -> str | None:
+    enriched_choice = _attach_booking_url(choice, flight_query)
+    return enriched_choice.get("booking_url")
+
+
 def _bounded_concurrency(task_count: int, max_concurrency: int) -> int:
     return max(1, min(task_count, max_concurrency))
 
@@ -586,19 +594,6 @@ def filter_flights_node(state: AgentState) -> AgentState:
         # the final shortlisted results.
         if is_multi_destination:
             sorted_choices = _keep_best_option_per_destination(sorted_choices)
-
-        if flight_query and not is_progress_cancelled(progress_id):
-            emit_progress(
-                progress_id,
-                "formatting_results",
-                f"Fetching booking links for {len(sorted_choices)} option(s)...",
-            )
-            sorted_choices = _attach_booking_urls_in_parallel(
-                sorted_choices,
-                flight_query,
-                max_concurrency=DEFAULT_MAX_BOOKING_URL_FETCH_CONCURRENCY,
-                progress_id=progress_id,
-            )
 
         result = {
             **state,

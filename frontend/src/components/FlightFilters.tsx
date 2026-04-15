@@ -10,6 +10,8 @@ interface FlightFiltersProps {
   flights: FlightOption[]
   content?: string
   onToggleTag?: (tag: FilterTag, isActive: boolean) => void
+  onBookFlight?: (flight: FlightOption) => void
+  bookingState?: Record<string, boolean>
 }
 
 function getStopsCount(stopCount: number | undefined, stops: string): number {
@@ -19,7 +21,7 @@ function getStopsCount(stopCount: number | undefined, stops: string): number {
   return m ? parseInt(m[1], 10) : 1
 }
 
-export function FlightFilters({ flights, content, onToggleTag }: FlightFiltersProps) {
+export function FlightFilters({ flights, content, onToggleTag, onBookFlight, bookingState }: FlightFiltersProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [stopsFilter, setStopsFilter] = useState<StopsFilter>('all')
   const [airlinesFilter, setAirlinesFilter] = useState<Set<string>>(new Set())
@@ -192,7 +194,12 @@ export function FlightFilters({ flights, content, onToggleTag }: FlightFiltersPr
       </div>
       <div className="flights">
         {paginatedFlights.map((f) => (
-          <FlightCard key={f.id} flight={f} />
+          <FlightCard
+            key={f.id}
+            flight={f}
+            isBooking={Boolean(bookingState?.[f.id])}
+            onBook={onBookFlight}
+          />
         ))}
       </div>
       

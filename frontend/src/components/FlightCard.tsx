@@ -1,3 +1,4 @@
+import { getFlightRouteLabel } from '../utils/flightRoute'
 import { useEffect, useState } from 'react'
 import type { FlightOption, FlightLeg } from '../types'
 import { getAirlineInfo } from '../utils/airlines'
@@ -5,6 +6,8 @@ import { ExternalLinkIcon } from './Icons'
 
 interface FlightCardProps {
   flight: FlightOption
+  isBooking?: boolean
+  onBook?: (flight: FlightOption) => void
 }
 
 function getBookingHost(url?: string) {
@@ -93,7 +96,7 @@ function FlightLegView({ leg, label }: { leg: FlightLeg, label?: string }) {
   )
 }
 
-export function FlightCard({ flight }: FlightCardProps) {
+export function FlightCard({ flight, isBooking = false, onBook }: FlightCardProps) {
   const bookingHost = getBookingHost(flight.bookingUrl)
 
   const getTripTypeLabel = (type: string) => {
@@ -109,19 +112,24 @@ export function FlightCard({ flight }: FlightCardProps) {
         <div className="flight-price-action">
           <span className="price">SGD {flight.price}</span>
           {flight.bookingUrl ? (
-            <a
+            <button
               className="book-btn"
-              href={flight.bookingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              type="button"
+              onClick={() => onBook?.(flight)}
               title={bookingHost ? `Book on ${bookingHost}` : 'Book on external website'}
             >
-              <span>Book</span>
+              <span>{isBooking ? 'Booking...' : 'Book'}</span>
               <ExternalLinkIcon className="external-icon" />
-            </a>
+            </button>
           ) : (
-            <button className="book-btn" type="button" disabled title="Booking link unavailable">
-              <span>Book</span>
+            <button
+              className="book-btn"
+              type="button"
+              onClick={() => onBook?.(flight)}
+              disabled={isBooking}
+              title={isBooking ? `Fetching booking link for ${getFlightRouteLabel(flight)}` : 'Fetch booking link'}
+            >
+              <span>{isBooking ? 'Booking...' : 'Book'}</span>
               <ExternalLinkIcon className="external-icon" />
             </button>
           )}

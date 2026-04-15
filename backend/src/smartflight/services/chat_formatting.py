@@ -193,5 +193,5 @@ def format_demo_flight(flight: dict) -> dict:
         "price": flight["price"],
         "tripType": trip_type,
         "legs": legs,
-        "bookingUrl": flight.get("bookingUrl"),
+        "bookingUrl": None,
     }

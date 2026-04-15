@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from smartflight.services.chat_formatting import format_demo_flight, format_graph_flight
+from smartflight.services.booking import resolve_booking_url, store_result_set
 from smartflight.services.nlu import run_flight_search
 from smartflight.services.flight_search import get_flights, is_demo_trigger
 from smartflight.services.progress import (
@@ -71,8 +72,19 @@ class ChatResponse(BaseModel):
 
     reply: str
     flights: list[FlightOption] | None = None
+    resultSetId: str | None = None
     description_of_recommendation: str | None = None
     intent: dict | None = None
+
+
+class BookingUrlRequest(BaseModel):
+    session_id: str
+    result_set_id: str
+    flight_id: str
+
+
+class BookingUrlResponse(BaseModel):
+    bookingUrl: str
 
 
 def _build_intent(result: dict) -> dict:
@@ -109,7 +121,12 @@ def _new_progress_id(session_id: str) -> str:
     return f"{session_id}:stream:{uuid4()}"
 
 
-def _iter_response_events(result: dict, message: str, progress_id: str | None = None) -> Iterator[dict]:
+def _iter_response_events(
+    result: dict,
+    message: str,
+    session_id: str,
+    progress_id: str | None = None,
+) -> Iterator[dict]:
     intent = _build_intent(result)
     if intent.get("error_message"):
         yield {
@@ -117,6 +134,7 @@ def _iter_response_events(result: dict, message: str, progress_id: str | None = 
             "data": ChatResponse(
                 reply=intent["error_message"],
                 flights=None,
+                resultSetId=None,
                 description_of_recommendation=None,
                 intent=intent,
             ),
@@ -133,8 +151,15 @@ def _iter_response_events(result: dict, message: str, progress_id: str | None = 
     route_info = _build_route_info(query)
     use_demo = is_demo_trigger(message)
     graph_flights = result.get("flight_choices") or []
+    result_set_id = str(uuid4())
 
     if graph_flights:
+        store_result_set(
+            session_id,
+            result_set_id,
+            query,
+            flight_choices=graph_flights,
+        )
         reply = f"Found {len(graph_flights)} flight option(s) {route_info}. See details below."
         flight_options = [
             FlightOption(**format_graph_flight(choice, idx))
@@ -143,11 +168,18 @@ def _iter_response_events(result: dict, message: str, progress_id: str | None = 
     else:
         demo_flights = get_flights(intent, use_demo=use_demo)
         if demo_flights:
+            store_result_set(
+                session_id,
+                result_set_id,
+                query,
+                demo_flights=demo_flights,
+            )
             reply = f"Found {len(demo_flights)} flight option(s) {route_info}. See details below."
             flight_options = [FlightOption(**format_demo_flight(flight)) for flight in demo_flights]
         else:
             reply = "No matching flights were found for your request."
             flight_options = None
+            result_set_id = None
 
     yield {
         "type": "progress",
@@ -168,6 +200,7 @@ def _iter_response_events(result: dict, message: str, progress_id: str | None = 
         "data": ChatResponse(
             reply=reply,
             flights=flight_options,
+            resultSetId=result_set_id,
             description_of_recommendation=description_of_recommendation,
             intent=intent,
         ),
@@ -183,7 +216,7 @@ def _run_chat_request_sync(
 ) -> ChatResponse:
     result = run_flight_search(message, user_context, session_id, progress_id=progress_id)
     response: ChatResponse | None = None
-    for event in _iter_response_events(result, message, progress_id):
+    for event in _iter_response_events(result, message, session_id, progress_id):
         if on_event is not None:
             on_event(event)
         if event["type"] == "completed":
@@ -274,6 +307,17 @@ async def chat(request: ChatRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/chat/booking-url", response_model=BookingUrlResponse)
+async def booking_url(request: BookingUrlRequest):
+    booking_url_value = await run_in_threadpool(
+        resolve_booking_url,
+        request.session_id,
+        request.result_set_id,
+        request.flight_id,
+    )
+    return BookingUrlResponse(bookingUrl=booking_url_value)
 
 
 @router.post("/chat/stream")
