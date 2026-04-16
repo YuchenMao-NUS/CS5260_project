@@ -77,7 +77,6 @@ export default function App() {
   const scrollToFilters = () => filtersRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   useEffect(() => {
-    // Attempt to silently get rough location (City, Country) from IP for better default origin matching
     fetch('https://get.geojs.io/v1/ip/geo.json')
       .then(res => res.json())
       .then(data => {
@@ -86,7 +85,7 @@ export default function App() {
         }
       })
       .catch(() => {
-        // Fail silently; we still have timezone as a fallback
+        // Fail silently; we still have timezone as a fallback.
       })
   }, [])
 
@@ -106,7 +105,6 @@ export default function App() {
     }
 
     setLoadingElapsedSeconds(0)
-    // Only fire at the two subtext threshold boundaries to avoid unnecessary re-renders
     const t1 = window.setTimeout(() => setLoadingElapsedSeconds(6), 6_000)
     const t2 = window.setTimeout(() => setLoadingElapsedSeconds(12), 12_000)
 
@@ -121,38 +119,32 @@ export default function App() {
       if (!isActive) {
         return prev.filter(t => t.id !== tag.id)
       }
+
       const idx = prev.findIndex(t => t.id === tag.id)
       if (idx >= 0) {
         const copy = [...prev]
         copy[idx] = tag
         return copy
       }
+
       return [...prev, tag]
     })
   }
 
-  const handleRemoveTag = (id: string) => {
-    setActiveTags(prev => prev.filter(t => t.id !== id))
-  }
-
-  const handleClearTags = () => {
-    setActiveTags([])
-  }
-
   const appendAssistantMessage = (content: string) => {
-    setMessages((prev) => [...prev, { id: createMessageId(), role: 'assistant', content }])
+    setMessages(prev => [...prev, { id: createMessageId(), role: 'assistant', content }])
   }
 
   const cacheBookingUrl = (messageId: string, flightId: string, bookingUrl: string) => {
-    setMessages((prev) =>
-      prev.map((message) => {
+    setMessages(prev =>
+      prev.map(message => {
         if (message.id !== messageId || !message.flights) {
           return message
         }
 
         return {
           ...message,
-          flights: message.flights.map((flight) =>
+          flights: message.flights.map(flight =>
             flight.id === flightId ? { ...flight, bookingUrl } : flight,
           ),
         }
@@ -177,7 +169,7 @@ export default function App() {
     appendAssistantMessage(
       `Fetching booking URL for flight ${routeLabel}. You will be automatically redirected to the booking page shortly.`,
     )
-    setBookingFlightIds((prev) => ({ ...prev, [bookingKey]: true }))
+    setBookingFlightIds(prev => ({ ...prev, [bookingKey]: true }))
 
     try {
       const result = await fetchBookingUrl({
@@ -187,14 +179,13 @@ export default function App() {
       })
 
       cacheBookingUrl(messageId, flight.id, result.bookingUrl)
-
       window.open(result.bookingUrl, '_blank', 'noopener,noreferrer')
     } catch (err) {
       appendAssistantMessage(
         `Error fetching booking URL for flight ${routeLabel}: ${err instanceof Error ? err.message : 'Request failed'}`,
       )
     } finally {
-      setBookingFlightIds((prev) => {
+      setBookingFlightIds(prev => {
         const next = { ...prev }
         delete next[bookingKey]
         return next
@@ -213,10 +204,9 @@ export default function App() {
     }
 
     setInput('')
-    // Clear tags after sending so they don't persist to the NEXT query
     setActiveTags([])
 
-    setMessages((prev) => [...prev, { id: createMessageId(), role: 'user', content: finalMessageText }])
+    setMessages(prev => [...prev, { id: createMessageId(), role: 'user', content: finalMessageText }])
     setLoading(true)
     setLoadingMessage('AI is analyzing your request...')
 
@@ -235,7 +225,8 @@ export default function App() {
           setLoadingStage(event.stage)
         },
       })
-      setMessages((prev) => [
+
+      setMessages(prev => [
         ...prev,
         {
           id: createMessageId(),
@@ -247,7 +238,7 @@ export default function App() {
         },
       ])
     } catch (err) {
-      setMessages((prev) => [
+      setMessages(prev => [
         ...prev,
         {
           id: createMessageId(),
@@ -319,17 +310,6 @@ export default function App() {
         </div>
 
         <div className="input-container">
-          {activeTags.length > 0 && (
-            <div className="input-tags">
-              {activeTags.map(tag => (
-                <span key={tag.id} className="input-tag">
-                  {tag.label}
-                  <button onClick={() => handleRemoveTag(tag.id)} title="Remove tag">×</button>
-                </span>
-              ))}
-              <button className="clear-tags" onClick={handleClearTags}>Clear all</button>
-            </div>
-          )}
           <div className="input-area">
             <input
               type="text"

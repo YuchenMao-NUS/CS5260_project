@@ -189,130 +189,51 @@
 /* Flight filters - Google Flights style */
 .flight-filters {
   margin-top: 0;
-  padding: 1rem 1.25rem;
-  background: #f1f5f9;
-  border: 2px solid #0f172a;
-  border-radius: 0.5rem;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  padding: 0.5rem 0.75rem;
+  background: #ffffff;
+  border: 1px solid #dbe2ea;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
 .filter-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  cursor: pointer;
-  user-select: none;
+  gap: 0.75rem;
 }
 
 .filter-title {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 700;
   color: #0f172a;
+  white-space: nowrap;
 }
 
-.filter-toggle-icon {
-  font-size: 0.75rem;
-  color: #64748b;
-  transition: transform 0.2s ease;
-}
-
-.filter-toggle-icon.expanded {
-  transform: rotate(180deg);
-}
-
-.filter-content {
-  margin-top: 1rem;
-}
-
-.filter-row {
-  margin-bottom: 0.75rem;
-}
-
-.filter-group {
+.filter-controls {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-}
-
-.filter-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  min-width: 4rem;
-}
-
-.filter-chips {
-  display: flex;
+  margin-left: auto;
   flex-wrap: wrap;
-  gap: 0.375rem;
-}
-
-.filter-chips-wrap {
-  flex-wrap: wrap;
-}
-
-.filter-chip {
-  padding: 0.5rem 1rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  border: 2px solid #94a3b8;
-  border-radius: 1.5rem;
-  background: white;
-  color: #334155;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.filter-chip:hover {
-  border-color: #0f172a;
-  color: #0f172a;
-}
-
-.filter-chip.active {
-  background: #0f172a;
-  border-color: #0f172a;
-  color: white;
-}
-
-.filter-chip:focus-visible {
-  outline: 2px solid #0f172a;
-  outline-offset: 2px;
-}
-
-.filter-chip-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  cursor: pointer;
-  margin: 0;
-}
-
-.filter-chip-check input {
-  margin: 0;
-  cursor: pointer;
 }
 
 .filter-select {
-  padding: 0.5rem 1rem;
+  padding: 0.45rem 2rem 0.45rem 0.75rem;
   font-size: 0.875rem;
   font-weight: 500;
-  border: 2px solid #94a3b8;
-  border-radius: 0.375rem;
+  border: 1px solid #d7dee7;
+  border-radius: 0.65rem;
   background: white;
   color: #334155;
   cursor: pointer;
+  min-width: 0;
+  line-height: 1.1;
 }
 
-.filter-result-count {
-  font-size: 0.8125rem;
-  color: #64748b;
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid #e2e8f0;
+.filter-select.compact {
+  min-width: 100px;
 }
 
 .flight-results-intro {
@@ -335,6 +256,23 @@
 
 .flight-filters-wrapper .flights {
   margin-top: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .filter-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .filter-controls {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .filter-select.compact {
+    flex: 1 1 calc(33.333% - 0.34rem);
+    min-width: 0;
+  }
 }
 
 .flight-card {
@@ -694,57 +632,6 @@
   background: white;
   border-top: 1px solid #e2e8f0;
   padding: 0.75rem 1rem;
-}
-
-.input-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  align-items: center;
-}
-
-.input-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  background: #e0e7ff;
-  color: #3730a3;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.input-tag button {
-  background: none;
-  border: none;
-  color: #3730a3;
-  cursor: pointer;
-  padding: 0;
-  font-size: 0.75rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.7;
-}
-
-.input-tag button:hover {
-  opacity: 1;
-}
-
-.clear-tags {
-  background: none;
-  border: none;
-  color: #64748b;
-  font-size: 0.75rem;
-  cursor: pointer;
-  text-decoration: underline;
-  padding: 0;
-}
-
-.clear-tags:hover {
-  color: #0f172a;
 }
 
 .input-area {
