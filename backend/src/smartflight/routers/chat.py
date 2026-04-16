@@ -36,6 +36,7 @@ router = APIRouter()
 class ChatContext(BaseModel):
     timeZone: str | None = None
     location: str | None = None
+    filters: list[dict[str, str]] | None = None
 
 class ChatRequest(BaseModel):
     """Chat request body."""

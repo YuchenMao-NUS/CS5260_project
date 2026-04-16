@@ -1,24 +1,53 @@
 from typing import List, Optional
+import logging
+
 from openai import OpenAI
 from pydantic import BaseModel
+
 from smartflight.agent.state import AgentState
 from smartflight.config import settings
 from smartflight.services.progress import emit_progress, raise_if_progress_cancelled
-import logging
 
 logger = logging.getLogger(__name__)
 
 
-
-# Structured LLM output schema
 class FlightPreferenceExtraction(BaseModel):
-    direct_only: Optional[bool]              # Whether direct flights are explicitly requested
-    preferred_airlines: Optional[List[str]]  # List of 2-letter airline codes
-    max_price: Optional[float]               # Max price SGD
-    min_price: Optional[float]               # Min price SGD
-    max_duration: Optional[int]              # Max duration (minutes)
-    min_duration: Optional[int]              # Min duration (minutes)
-    
+    direct_only: Optional[bool] = None
+    max_stops: Optional[int] = None
+    min_stops: Optional[int] = None
+    preferred_airlines: Optional[List[str]] = None
+    max_price: Optional[float] = None
+    min_price: Optional[float] = None
+    max_duration: Optional[int] = None
+    min_duration: Optional[int] = None
+
+
+def _preference_from_filters(user_filters: list[dict]) -> dict[str, object]:
+    preference: dict[str, object] = {}
+
+    for raw_filter in user_filters:
+        filter_id = str(raw_filter.get("id") or "").strip()
+        filter_label = str(raw_filter.get("label") or "").strip()
+
+        if filter_id == "stops":
+            if filter_label == "Direct flights only":
+                preference["direct_only"] = True
+                preference["max_stops"] = 0
+                preference["min_stops"] = None
+            elif filter_label == "Max 1 stop":
+                preference["direct_only"] = False
+                preference["max_stops"] = 1
+                preference["min_stops"] = None
+            elif filter_label == "2+ stops":
+                preference["direct_only"] = False
+                preference["max_stops"] = None
+                preference["min_stops"] = 2
+        elif filter_id.startswith("airline-"):
+            airline_code = filter_id.removeprefix("airline-").upper()
+            if airline_code:
+                preference["preferred_airlines"] = [airline_code]
+
+    return preference
 
 
 def extract_preference_node(state: AgentState) -> AgentState:
@@ -37,36 +66,32 @@ def extract_preference_node(state: AgentState) -> AgentState:
     raise_if_progress_cancelled(state.get("progress_id"))
 
     user_input = state["user_input"]
-
-    # Retrieve historical preferences from the current state; if no such preferences exist, initialize them to an empty dictionary
+    user_filters = state.get("user_context", {}).get("filters") or []
     existing_preference = state.get("flight_preference") or {}
 
     system_prompt = """
 You are a flight preference extraction assistant. Extract the user's soft preferences from their natural language input.
-All fields are optional — only populate a field if the user explicitly or implicitly expresses that preference.
+All fields are optional and should only be populated if the user expresses that preference.
 
 Extraction rules:
 1. direct_only:
-   - true if the user wants non-stop/direct flights only (e.g. "direct", "non-stop", "不转机", "直飞")
-   - false if the user explicitly says they don't mind connecting flights
-   - null if not mentioned at all
-
-2. preferred_airlines:
-   - Extract as a list of IATA 2-letter airline codes (e.g. "CA" for Air China, "MU" for China Eastern, "SQ" for Singapore Airlines)
-   - null if no airline preference is mentioned
-
-3. max_price / min_price:
+   - true if the user wants direct/non-stop flights only
+   - false if the user explicitly says stops are acceptable
+   - null if not mentioned
+2. max_stops / min_stops:
+   - Extract stop-count constraints when stated
+   - "direct only" implies max_stops=0
+   - "max 1 stop" implies max_stops=1
+   - "2+ stops" implies min_stops=2
+3. preferred_airlines:
+   - Return IATA 2-letter airline codes
+4. max_price / min_price:
    - Extract price constraints in SGD
-   - If user says "under $500", set max_price=500.0, min_price=null
-   - If user says "around $300", set min_price=270.0, max_price=330.0 (±10%)
-   - null if not mentioned
-
-4. max_duration / min_duration:
-   - Extract flight duration constraints in MINUTES
-   - If user says "less than 3 hours", set max_duration=180, min_duration=null
-   - null if not mentioned
+   - "around 300" means min_price=270 and max_price=330
+5. max_duration / min_duration:
+   - Extract duration constraints in minutes
 """.strip()
-    
+
     logger.debug("[extract_preference] system_prompt:\n%s", system_prompt)
     logger.debug("[extract_preference] user_input: %s", user_input)
 
@@ -80,12 +105,10 @@ Extraction rules:
     )
 
     extraction: FlightPreferenceExtraction = response.choices[0].message.parsed
-
-    # Merging old and new preferences
-    # If the field extracted this time is not None, then overwrite.
-    # Otherwise, revert to using the value stored in existing_preference.
     merged_preference = {
         "direct_only": extraction.direct_only if extraction.direct_only is not None else existing_preference.get("direct_only"),
+        "max_stops": extraction.max_stops if extraction.max_stops is not None else existing_preference.get("max_stops"),
+        "min_stops": extraction.min_stops if extraction.min_stops is not None else existing_preference.get("min_stops"),
         "preferred_airlines": extraction.preferred_airlines if extraction.preferred_airlines is not None else existing_preference.get("preferred_airlines"),
         "max_price": extraction.max_price if extraction.max_price is not None else existing_preference.get("max_price"),
         "min_price": extraction.min_price if extraction.min_price is not None else existing_preference.get("min_price"),
@@ -93,9 +116,10 @@ Extraction rules:
         "min_duration": extraction.min_duration if extraction.min_duration is not None else existing_preference.get("min_duration"),
     }
 
-    logger.info(f"[extract_preference] Updated Preferences: {merged_preference}")
+    merged_preference.update(_preference_from_filters(user_filters))
+
+    logger.info("[extract_preference] Updated Preferences: %s", merged_preference)
 
     return {
-        # **state,
         "flight_preference": merged_preference,
     }

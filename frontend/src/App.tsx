@@ -195,13 +195,9 @@ export default function App() {
 
   const sendMessage = async () => {
     const text = input.trim()
-    if ((!text && activeTags.length === 0) || loading) return
+    if (!text || loading) return
 
-    let finalMessageText = text
-    if (activeTags.length > 0) {
-      const tagStrings = activeTags.map(t => `[${t.label}]`).join(' ')
-      finalMessageText = text ? `${text} ${tagStrings}` : tagStrings
-    }
+    const finalMessageText = text
 
     setInput('')
     setActiveTags([])
@@ -218,6 +214,7 @@ export default function App() {
         context: {
           timeZone,
           location: userLocation,
+          filters: activeTags,
         },
       }, {
         onProgress: (event) => {
@@ -319,7 +316,7 @@ export default function App() {
               placeholder="Describe your trip..."
               disabled={loading}
             />
-            <button onClick={sendMessage} disabled={loading || (!input.trim() && activeTags.length === 0)}>
+            <button onClick={sendMessage} disabled={loading || !input.trim()}>
               Send
             </button>
           </div>

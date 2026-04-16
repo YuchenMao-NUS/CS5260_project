@@ -718,6 +718,59 @@ def test_extract_preference_merges_with_existing_state(monkeypatch):
     assert result["flight_preference"]["max_price"] == 500.0
 
 
+def test_extract_preference_applies_structured_ui_filters(monkeypatch):
+    """Structured frontend filters should update preference memory without polluting user text."""
+
+    class FakeCompletions:
+        @staticmethod
+        def parse(*args, **kwargs):
+            parsed = extract_preference_module.FlightPreferenceExtraction(
+                direct_only=None,
+                max_stops=None,
+                min_stops=None,
+                preferred_airlines=None,
+                max_price=None,
+                min_price=None,
+                max_duration=None,
+                min_duration=None,
+            )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))]
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, *args, **kwargs):
+            self.beta = SimpleNamespace(
+                chat=SimpleNamespace(completions=FakeCompletions())
+            )
+
+    monkeypatch.setattr(extract_preference_module.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(extract_preference_module, "OpenAI", FakeOpenAIClient)
+
+    result = extract_preference_module.extract_preference_node(
+        {
+            "session_id": "chat-session",
+            "progress_id": None,
+            "user_input": "return after 1 week",
+            "user_context": {
+                "filters": [
+                    {"id": "stops", "label": "Max 1 stop"},
+                    {"id": "airline-SQ", "label": "Singapore Airlines"},
+                ]
+            },
+            "flight_query": None,
+            "flight_preference": {},
+            "flight_choices": None,
+            "error_message": None,
+        }
+    )
+
+    assert result["flight_preference"]["direct_only"] is False
+    assert result["flight_preference"]["max_stops"] == 1
+    assert result["flight_preference"]["min_stops"] is None
+    assert result["flight_preference"]["preferred_airlines"] == ["SQ"]
+
+
 def test_filter_flights_clears_stale_choices_when_search_returns_none():
     """Empty search results should clear any checkpointed flight choices."""
 
@@ -746,6 +799,123 @@ def test_filter_flights_clears_stale_choices_when_search_returns_none():
 
     assert result["flight_choices"] == []
     assert result["error_message"] is None
+
+
+def test_filter_flights_honors_max_stops_preference():
+    """Stop-count preferences from UI filters should participate in hard filtering."""
+
+    one_stop_segments = [
+        SimpleNamespace(
+            from_airport=SimpleNamespace(code="SIN"),
+            to_airport=SimpleNamespace(code="HKG"),
+            departure=SimpleNamespace(date=(2026, 5, 1), time=(8, 0)),
+            arrival=SimpleNamespace(date=(2026, 5, 1), time=(12, 0)),
+            duration=240,
+            flight_number="SQ001",
+        ),
+        SimpleNamespace(
+            from_airport=SimpleNamespace(code="HKG"),
+            to_airport=SimpleNamespace(code="TYO"),
+            departure=SimpleNamespace(date=(2026, 5, 1), time=(13, 30)),
+            arrival=SimpleNamespace(date=(2026, 5, 1), time=(19, 10)),
+            duration=340,
+            flight_number="SQ002",
+        ),
+    ]
+
+    two_stop_segments = [
+        SimpleNamespace(
+            from_airport=SimpleNamespace(code="SIN"),
+            to_airport=SimpleNamespace(code="HKG"),
+            departure=SimpleNamespace(date=(2026, 5, 1), time=(7, 0)),
+            arrival=SimpleNamespace(date=(2026, 5, 1), time=(11, 0)),
+            duration=240,
+            flight_number="CX101",
+        ),
+        SimpleNamespace(
+            from_airport=SimpleNamespace(code="HKG"),
+            to_airport=SimpleNamespace(code="TPE"),
+            departure=SimpleNamespace(date=(2026, 5, 1), time=(12, 0)),
+            arrival=SimpleNamespace(date=(2026, 5, 1), time=(14, 0)),
+            duration=120,
+            flight_number="CX102",
+        ),
+        SimpleNamespace(
+            from_airport=SimpleNamespace(code="TPE"),
+            to_airport=SimpleNamespace(code="TYO"),
+            departure=SimpleNamespace(date=(2026, 5, 1), time=(15, 0)),
+            arrival=SimpleNamespace(date=(2026, 5, 1), time=(19, 0)),
+            duration=240,
+            flight_number="CX103",
+        ),
+    ]
+
+    result = filter_flights_module.filter_flights_node(
+        {
+            "session_id": "chat-session",
+            "progress_id": None,
+            "user_input": "return after 1 week",
+            "user_context": {},
+            "flight_query": {
+                "trip": "one_way",
+                "from_airport": "SIN",
+                "to_airports": ["TYO"],
+                "departure_date": "2026-05-01",
+                "return_date": None,
+                "seat_classes": "economy",
+                "passengers": 1,
+                "is_multi_destination": False,
+                "description_of_recommendation": None,
+            },
+            "flight_preference": {
+                "max_stops": 1,
+            },
+            "flight_choices": [
+                {
+                    "trip": "one_way",
+                    "from_airport": "SIN",
+                    "to_airport": "TYO",
+                    "departure_date": "2026-05-01",
+                    "return_date": None,
+                    "booking_url": None,
+                    "tfu_token": None,
+                    "is_direct": False,
+                    "airlines": ["SQ"],
+                    "price": 420.0,
+                    "duration": 430,
+                    "flights": one_stop_segments,
+                    "is_direct_2": None,
+                    "airlines_2": None,
+                    "price_2": None,
+                    "duration_2": None,
+                    "flights_2": None,
+                },
+                {
+                    "trip": "one_way",
+                    "from_airport": "SIN",
+                    "to_airport": "TYO",
+                    "departure_date": "2026-05-01",
+                    "return_date": None,
+                    "booking_url": None,
+                    "tfu_token": None,
+                    "is_direct": False,
+                    "airlines": ["CX"],
+                    "price": 380.0,
+                    "duration": 600,
+                    "flights": two_stop_segments,
+                    "is_direct_2": None,
+                    "airlines_2": None,
+                    "price_2": None,
+                    "duration_2": None,
+                    "flights_2": None,
+                },
+            ],
+            "error_message": None,
+        }
+    )
+
+    assert len(result["flight_choices"]) == 1
+    assert result["flight_choices"][0]["airlines"] == ["SQ"]
 
 
 def test_extract_query_skips_openai_when_progress_cancelled(monkeypatch):

@@ -33,6 +33,7 @@ export interface ChatRequest {
   context?: {
     timeZone?: string
     location?: string
+    filters?: FilterTag[]
   }
 }
 

@@ -250,6 +250,21 @@ def _is_direct_effective(choice: FlightInformation) -> bool:
     return bool(choice["is_direct"]) and bool(choice["is_direct_2"])
 
 
+def _leg_stop_count(segments) -> int:
+    if not segments:
+        return 0
+    return max(0, len(segments) - 1)
+
+
+def _effective_stop_bounds(choice: FlightInformation) -> tuple[int, int]:
+    outbound_stops = _leg_stop_count(choice.get("flights") or [])
+    if choice["trip"] == "one_way":
+        return outbound_stops, outbound_stops
+
+    inbound_stops = _leg_stop_count(choice.get("flights_2") or [])
+    return min(outbound_stops, inbound_stops), max(outbound_stops, inbound_stops)
+
+
 def _all_airlines(choice: FlightInformation) -> list[str]:
     airlines = list(choice.get("airlines") or [])
     airlines_2 = list(choice.get("airlines_2") or [])
@@ -271,10 +286,18 @@ def _matches_preferences(
     min_price = pref.get("min_price")
     max_duration = pref.get("max_duration")
     min_duration = pref.get("min_duration")
+    max_stops = pref.get("max_stops")
+    min_stops = pref.get("min_stops")
     preferred_airlines = pref.get("preferred_airlines")
+    effective_min_stops, effective_max_stops = _effective_stop_bounds(choice)
 
     # 1) direct_only is a hard constraint only when True
     if direct_only is True and not _is_direct_effective(choice):
+        return False
+
+    if max_stops is not None and effective_max_stops > max_stops:
+        return False
+    if min_stops is not None and effective_min_stops < min_stops:
         return False
 
     # 2) price hard constraints

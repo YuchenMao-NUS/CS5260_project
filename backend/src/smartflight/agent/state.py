@@ -17,6 +17,8 @@ class FlightQuery(TypedDict):
 
 class FlightPreference(TypedDict):
     direct_only: Optional[bool]               # True=direct only, False=doesn't matter, None=not mentioned
+    max_stops: Optional[int]                  # Maximum allowed stops across a leg
+    min_stops: Optional[int]                  # Minimum required stops across a leg
     preferred_airlines: Optional[List[str]]   # List of IATA airline codes, e.g. ["CA", "MU"]
     max_price: Optional[float]                # Max price (SGD)
     min_price: Optional[float]                # Min price (SDG)

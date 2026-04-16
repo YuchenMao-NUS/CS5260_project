@@ -147,14 +147,26 @@ def _infer_dates(previous_query: dict, trip: str) -> tuple[str, str | None]:
     return departure_date, None
 
 
-def _infer_preference(message: str, previous_preference: dict) -> dict:
+def _infer_preference(message: str, previous_preference: dict, context_filters: list[dict] | None = None) -> dict:
     normalized = message.lower()
     preference = dict(previous_preference)
 
     if any(hint in normalized for hint in DIRECT_TRUE_HINTS):
         preference["direct_only"] = True
+        preference["max_stops"] = 0
+        preference["min_stops"] = None
     elif any(hint in normalized for hint in DIRECT_FALSE_HINTS):
         preference["direct_only"] = False
+
+    if "max 1 stop" in normalized or "up to 1 stop" in normalized:
+        preference["direct_only"] = False
+        preference["max_stops"] = 1
+        preference["min_stops"] = None
+
+    if "2+ stops" in normalized or "at least 2 stops" in normalized:
+        preference["direct_only"] = False
+        preference["max_stops"] = None
+        preference["min_stops"] = 2
 
     matched_airlines = [
         airline_code
@@ -163,6 +175,27 @@ def _infer_preference(message: str, previous_preference: dict) -> dict:
     ]
     if matched_airlines:
         preference["preferred_airlines"] = matched_airlines
+
+    for raw_filter in (context_filters or []):
+        filter_id = str(raw_filter.get("id") or "").strip()
+        filter_label = str(raw_filter.get("label") or "").strip()
+        if filter_id == "stops":
+            if filter_label == "Direct flights only":
+                preference["direct_only"] = True
+                preference["max_stops"] = 0
+                preference["min_stops"] = None
+            elif filter_label == "Max 1 stop":
+                preference["direct_only"] = False
+                preference["max_stops"] = 1
+                preference["min_stops"] = None
+            elif filter_label == "2+ stops":
+                preference["direct_only"] = False
+                preference["max_stops"] = None
+                preference["min_stops"] = 2
+        elif filter_id.startswith("airline-"):
+            airline_code = filter_id.removeprefix("airline-").upper()
+            if airline_code:
+                preference["preferred_airlines"] = [airline_code]
 
     if around_match := PRICE_AROUND_PATTERN.search(message):
         price = float(around_match.group(1))
@@ -184,7 +217,8 @@ def _fallback_result(
     error: Exception | str,
 ) -> dict:
     previous_query = previous_state.get("flight_query") or {}
-    previous_preference = previous_state.get("flight_preference") or {}
+    previous_preference = dict(previous_state.get("flight_preference") or {})
+    context_filters = list((user_context or {}).get("filters") or [])
     trip = _infer_trip(message, previous_query)
     from_airport = _infer_origin(message, user_context, previous_query)
     to_airports = _infer_destinations(message, previous_query, from_airport)
@@ -194,7 +228,7 @@ def _fallback_result(
         return {
             "user_input": message,
             "flight_query": None,
-            "flight_preference": _infer_preference(message, previous_preference),
+            "flight_preference": _infer_preference(message, previous_preference, context_filters),
             "error_message": (
                 "I couldn't resolve the destination into airport codes. "
                 "Please specify a city or airport."
@@ -206,7 +240,7 @@ def _fallback_result(
         return {
             "user_input": message,
             "flight_query": None,
-            "flight_preference": _infer_preference(message, previous_preference),
+            "flight_preference": _infer_preference(message, previous_preference, context_filters),
             "error_message": (
                 f"Your origin and destination both seem to be {from_airport}. "
                 "Please specify a different destination."
@@ -227,7 +261,7 @@ def _fallback_result(
             "is_multi_destination": previous_query.get("is_multi_destination", len(to_airports) > 1),
             "description_of_recommendation": previous_query.get("description_of_recommendation"),
         },
-        "flight_preference": _infer_preference(message, previous_preference),
+        "flight_preference": _infer_preference(message, previous_preference, context_filters),
         "error_message": None,
         "flight_choices": None,
     }
