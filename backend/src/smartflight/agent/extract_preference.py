@@ -50,6 +50,46 @@ def _preference_from_filters(user_filters: list[dict]) -> dict[str, object]:
     return preference
 
 
+def _build_previous_context(history: Optional[List[dict]], max_turns: int = 5) -> str:
+    if not history:
+        return "No previous context. This is a new search."
+
+    recent = history[-max_turns:]
+    lines: List[str] = []
+
+    for i, turn in enumerate(recent, 1):
+        lines.append(f"[Turn {i}]")
+        lines.append(f"User: {turn.get('user_input')}")
+
+        fq = turn.get("flight_query")
+        if fq:
+            lines.append(
+                "Query: "
+                f"trip={fq.get('trip')}, "
+                f"from={fq.get('from_airport')}, "
+                f"to={fq.get('to_airports')}, "
+                f"departure={fq.get('departure_date')}, "
+                f"return={fq.get('return_date')}, "
+                f"class={fq.get('seat_classes')}, "
+                f"passengers={fq.get('passengers')}"
+            )
+        else:
+            lines.append("Query: None")
+
+        pref = turn.get("flight_preference")
+        if pref:
+            lines.append(
+                "Preference: "
+                + ", ".join(f"{k}={v}" for k, v in pref.items())
+            )
+        else:
+            lines.append("Preference: None")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def extract_preference_node(state: AgentState) -> AgentState:
     raise_if_progress_cancelled(state.get("progress_id"))
 
@@ -68,9 +108,23 @@ def extract_preference_node(state: AgentState) -> AgentState:
     user_input = state["user_input"]
     user_filters = state.get("user_context", {}).get("filters") or []
     existing_preference = state.get("flight_preference") or {}
+    history = state.get("history")
+    previous_context = _build_previous_context(history)
 
-    system_prompt = """
+    logger.info("=== previous_context (preference) ===")
+    for line in previous_context.split("\n"):
+        logger.info("  %s", line)
+
+    system_prompt = f"""
 You are a flight preference extraction assistant. Extract the user's soft preferences from their natural language input.
+
+The previous context below is the conversation memory:
+{previous_context}
+
+CRITICAL INSTRUCTION:
+Use the previous context to understand whether the user is adding, refining, or changing a preference.
+Do not discard previous preferences unless the user explicitly changes them or clearly implies a change.
+
 All fields are optional and should only be populated if the user expresses that preference.
 
 Extraction rules:
@@ -105,6 +159,7 @@ Extraction rules:
     )
 
     extraction: FlightPreferenceExtraction = response.choices[0].message.parsed
+
     merged_preference = {
         "direct_only": extraction.direct_only if extraction.direct_only is not None else existing_preference.get("direct_only"),
         "max_stops": extraction.max_stops if extraction.max_stops is not None else existing_preference.get("max_stops"),

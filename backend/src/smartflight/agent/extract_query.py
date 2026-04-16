@@ -2,15 +2,15 @@ from datetime import datetime, timedelta
 import logging
 import re
 from typing import List, Literal, Optional
+
 from openai import OpenAI
 from pydantic import BaseModel
+
 from smartflight.agent.state import AgentState
 from smartflight.config import settings
 from smartflight.services.progress import emit_progress, raise_if_progress_cancelled
 
 logger = logging.getLogger(__name__)
-
-
 
 IATA_CODE_PATTERN = re.compile(r"^[A-Z]{3}$")
 
@@ -47,6 +47,46 @@ def _normalize_iata_codes(values: Optional[List[str]]) -> List[str]:
     return normalized
 
 
+def _build_previous_context(history: Optional[List[dict]], max_turns: int = 5) -> str:
+    if not history:
+        return "No previous context. This is a new search."
+
+    recent = history[-max_turns:]
+    lines: List[str] = []
+
+    for i, turn in enumerate(recent, 1):
+        lines.append(f"[Turn {i}]")
+        lines.append(f"User: {turn.get('user_input')}")
+
+        fq = turn.get("flight_query")
+        if fq:
+            lines.append(
+                "Query: "
+                f"trip={fq.get('trip')}, "
+                f"from={fq.get('from_airport')}, "
+                f"to={fq.get('to_airports')}, "
+                f"departure={fq.get('departure_date')}, "
+                f"return={fq.get('return_date')}, "
+                f"class={fq.get('seat_classes')}, "
+                f"passengers={fq.get('passengers')}"
+            )
+        else:
+            lines.append("Query: None")
+
+        pref = turn.get("flight_preference")
+        if pref:
+            lines.append(
+                "Preference: "
+                + ", ".join(f"{k}={v}" for k, v in pref.items())
+            )
+        else:
+            lines.append("Preference: None")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def extract_query_node(state: AgentState) -> AgentState:
     raise_if_progress_cancelled(state.get("progress_id"))
 
@@ -71,12 +111,12 @@ def extract_query_node(state: AgentState) -> AgentState:
     tz = user_context.get("timeZone", "")
     user_loc_str = f"City/Country: {location}" if location else f"Timezone: {tz}"
 
-    previous_query = state.get("flight_query")
-    previous_context = (
-        f"Previously extracted parameters: {previous_query}"
-        if previous_query
-        else "No previous parameters. This is a new search."
-    )
+    history = state.get("history")
+    previous_context = _build_previous_context(history)
+
+    logger.info("=== previous_context (query) ===")
+    for line in previous_context.split("\n"):
+        logger.info("  %s", line)
 
     system_prompt = f"""
 You are a flight search assistant. Extract structured flight search parameters from the user's natural language input.
@@ -84,7 +124,12 @@ Today's date is {today}, {weekday}.
 The user's current known location context is: {user_loc_str}.
 
 {previous_context}
-CRITICAL INSTRUCTION: If there are "Previously extracted parameters", the user is likely answering a follow-up question or providing missing information. You MUST merge the new information from the user's current input with the previously extracted parameters. Do not discard previous constraints unless the user explicitly changes them.
+
+CRITICAL INSTRUCTION:
+The previous context above is the conversation memory.
+The user may be refining an earlier request, answering a follow-up question, or providing missing information.
+You must use the previous context to infer the final merged query state.
+Do not discard previous constraints unless the user explicitly changes them or clearly implies a change.
 
 Extraction rules:
 1. from_airport: MUST use 3-letter IATA codes. If not explicitly mentioned in the query, deduce the nearest major airport IATA code from their location (e.g. if location is Beijing, use PEK or PKX; if Singapore, use SIN). If location context is completely unhelpful, default to SIN.
@@ -95,9 +140,11 @@ Extraction rules:
 6. seat_classes: If not specified, return "economy".
 7. passengers: If not specified, default to 1.
 8. is_multi_destination:
-   - Set to `true` when the user has no specific destination.
-   - Set to `false` if they only want to visit one destination.
+   - Set to true when the user has no specific destination.
+   - Set to false if they only want to visit one destination.
 9. description_of_recommendation: Give a brief description of your recommendation.
+
+Return the fully merged final query state.
 """.strip()
 
     logger.debug("[extract_query] system_prompt:\n%s", system_prompt)

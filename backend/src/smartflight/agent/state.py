@@ -57,3 +57,4 @@ class AgentState(TypedDict):
     flight_preference: Optional[FlightPreference]  # Extracted user preferences
     flight_choices: Optional[List[FlightInformation]]
     error_message: Optional[str]                   # Node error message (e.g. missing origin)
+    history: Optional[List[dict]]                  # history of turns

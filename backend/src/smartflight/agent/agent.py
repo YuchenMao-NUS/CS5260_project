@@ -29,11 +29,28 @@ def dispatch_extractions(state: AgentState) -> dict:
 # Join Node
 def join_extractions(state: AgentState) -> dict:
     """
-    This is an empty node, used only to wait for `extract_query` and `extract_preference` to complete in parallel.
-    LangGraph will summarize the state updates from the previous Superstep at this node.
-    Returning an empty dictionary indicates that no state is modified.
+    Wait for `extract_query` and `extract_preference` to finish, then
+    append a single history record for this turn.
+
+    This avoids history write conflicts inside parallel branches.
     """
-    return {}
+    history = list(state.get("history") or [])
+
+    history.append(
+        {
+            "user_input": state.get("user_input"),
+            "flight_query": state.get("flight_query"),
+            "flight_preference": state.get("flight_preference"),
+        }
+    )
+
+    # Keep only the most recent turns to avoid unbounded growth
+    max_turns = 5
+    history = history[-max_turns:]
+
+    return {
+        "history": history,
+    }
 
 
 # Conditional Edge
