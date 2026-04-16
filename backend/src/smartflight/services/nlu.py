@@ -47,16 +47,18 @@ def _build_input_state(
     user_context: dict | None,
     session_id: str,
     progress_id: str | None,
-    previous_state: dict | None = None,
 ) -> dict:
-    previous_state = previous_state or {}
+    """
+    Build only the fresh per-turn input state.
+
+    Previous graph state will be restored automatically by LangGraph
+    via the checkpointer using thread_id.
+    """
     return {
         "session_id": session_id,
         "progress_id": progress_id,
         "user_input": message,
         "user_context": user_context or {},
-        "flight_query": previous_state.get("flight_query"),
-        "flight_preference": previous_state.get("flight_preference"),
         "error_message": None,
         "flight_choices": None,
     }
@@ -147,7 +149,11 @@ def _infer_dates(previous_query: dict, trip: str) -> tuple[str, str | None]:
     return departure_date, None
 
 
-def _infer_preference(message: str, previous_preference: dict, context_filters: list[dict] | None = None) -> dict:
+def _infer_preference(
+    message: str,
+    previous_preference: dict,
+    context_filters: list[dict] | None = None,
+) -> dict:
     normalized = message.lower()
     preference = dict(previous_preference)
 
@@ -218,38 +224,52 @@ def _fallback_result(
 ) -> dict:
     previous_query = previous_state.get("flight_query") or {}
     previous_preference = dict(previous_state.get("flight_preference") or {})
+    previous_history = list(previous_state.get("history") or [])
     context_filters = list((user_context or {}).get("filters") or [])
+
     trip = _infer_trip(message, previous_query)
     from_airport = _infer_origin(message, user_context, previous_query)
     to_airports = _infer_destinations(message, previous_query, from_airport)
     departure_date, return_date = _infer_dates(previous_query, trip)
+    inferred_preference = _infer_preference(message, previous_preference, context_filters)
 
     if not to_airports:
         return {
+            "session_id": previous_state.get("session_id"),
+            "progress_id": previous_state.get("progress_id"),
             "user_input": message,
+            "user_context": user_context or {},
             "flight_query": None,
-            "flight_preference": _infer_preference(message, previous_preference, context_filters),
+            "flight_preference": inferred_preference,
             "error_message": (
                 "I couldn't resolve the destination into airport codes. "
                 "Please specify a city or airport."
             ),
             "flight_choices": None,
+            "history": previous_history,
         }
 
     if from_airport in to_airports:
         return {
+            "session_id": previous_state.get("session_id"),
+            "progress_id": previous_state.get("progress_id"),
             "user_input": message,
+            "user_context": user_context or {},
             "flight_query": None,
-            "flight_preference": _infer_preference(message, previous_preference, context_filters),
+            "flight_preference": inferred_preference,
             "error_message": (
                 f"Your origin and destination both seem to be {from_airport}. "
                 "Please specify a different destination."
             ),
             "flight_choices": None,
+            "history": previous_history,
         }
 
     return {
+        "session_id": previous_state.get("session_id"),
+        "progress_id": previous_state.get("progress_id"),
         "user_input": message,
+        "user_context": user_context or {},
         "flight_query": {
             "from_airport": from_airport,
             "to_airports": to_airports,
@@ -261,9 +281,10 @@ def _fallback_result(
             "is_multi_destination": previous_query.get("is_multi_destination", len(to_airports) > 1),
             "description_of_recommendation": previous_query.get("description_of_recommendation"),
         },
-        "flight_preference": _infer_preference(message, previous_preference, context_filters),
+        "flight_preference": inferred_preference,
         "error_message": None,
         "flight_choices": None,
+        "history": previous_history,
     }
 
 
@@ -277,13 +298,11 @@ def run_flight_search(
     Run the full flight agent pipeline and return the graph state.
     """
     resolved_session_id = _resolve_session_id(session_id)
-    previous_state = _safe_get_previous_state(resolved_session_id)
     input_state = _build_input_state(
         message,
         user_context,
         resolved_session_id,
         progress_id,
-        previous_state,
     )
 
     try:
@@ -295,6 +314,7 @@ def run_flight_search(
     except ProgressCancelledError:
         raise
     except Exception as e:
+        previous_state = _safe_get_previous_state(resolved_session_id)
         return _fallback_result(message, user_context, previous_state, e)
 
 
