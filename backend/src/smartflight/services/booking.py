@@ -96,6 +96,10 @@ def resolve_booking_url(session_id: str, result_set_id: str, flight_id: str) -> 
     if choice is None:
         raise HTTPException(status_code=404, detail="Flight not found in this response.")
 
+    saved_booking_url = choice.get("booking_url") or choice.get("bookingUrl")
+    if saved_booking_url:
+        return saved_booking_url
+
     booking_url = fetch_booking_url_for_choice(choice, flight_query)
     if not booking_url:
         raise HTTPException(status_code=502, detail="Unable to fetch a booking link for this flight.")

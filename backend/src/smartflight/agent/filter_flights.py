@@ -29,6 +29,8 @@ result_logger.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_BOOKING_URL_FETCH_CONCURRENCY = 5
+BOOKING_URL_FETCH_TIMEOUT_MS = 5_000
+BOOKING_URL_FETCH_MAX_ATTEMPTS = 2
 
 
 def _get_seat(seat_class: str) -> str:
@@ -122,23 +124,29 @@ def _fetch_one_way_booking_url(
         route_label,
         len(selected_segments),
     )
-    try:
-        booking_links = asyncio.run(
-            fetch_booking_links_for_query(
-                booking_query,
-                headless=True,
-                timeout_ms=300000,
+    booking_links: list[str] = []
+    for attempt in range(1, BOOKING_URL_FETCH_MAX_ATTEMPTS + 1):
+        try:
+            booking_links = asyncio.run(
+                fetch_booking_links_for_query(
+                    booking_query,
+                    headless=True,
+                    timeout_ms=BOOKING_URL_FETCH_TIMEOUT_MS,
+                )
             )
-        )
-    except Exception as exc:
-        logger.warning(
-            "One-way booking URL fetch failed: route=%s, elapsed=%.2fs, error=%s",
-            route_label,
-            perf_counter() - started_at,
-            exc,
-        )
-        result_logger.warning("Final one-way booking fetch failed: %s", exc)
-        return None
+            break
+        except Exception as exc:
+            logger.warning(
+                "One-way booking URL fetch attempt failed: route=%s, attempt=%d/%d, elapsed=%.2fs, error=%s",
+                route_label,
+                attempt,
+                BOOKING_URL_FETCH_MAX_ATTEMPTS,
+                perf_counter() - started_at,
+                exc,
+            )
+            if attempt == BOOKING_URL_FETCH_MAX_ATTEMPTS:
+                result_logger.warning("Final one-way booking fetch failed: %s", exc)
+                return None
     booking_url = booking_links[0] if booking_links else None
     logger.info(
         "Finished one-way booking URL fetch: route=%s, found=%s, links=%d, elapsed=%.2fs",
@@ -201,23 +209,29 @@ def _fetch_round_trip_booking_url(
         len(outbound_segments),
         len(inbound_segments),
     )
-    try:
-        booking_links = asyncio.run(
-            fetch_booking_links_for_query(
-                booking_query,
-                headless=True,
-                timeout_ms=300000,
+    booking_links: list[str] = []
+    for attempt in range(1, BOOKING_URL_FETCH_MAX_ATTEMPTS + 1):
+        try:
+            booking_links = asyncio.run(
+                fetch_booking_links_for_query(
+                    booking_query,
+                    headless=True,
+                    timeout_ms=BOOKING_URL_FETCH_TIMEOUT_MS,
+                )
             )
-        )
-    except Exception as exc:
-        logger.warning(
-            "Round-trip booking URL fetch failed: route=%s, elapsed=%.2fs, error=%s",
-            route_label,
-            perf_counter() - started_at,
-            exc,
-        )
-        result_logger.warning("Final round-trip booking fetch failed: %s", exc)
-        return None
+            break
+        except Exception as exc:
+            logger.warning(
+                "Round-trip booking URL fetch attempt failed: route=%s, attempt=%d/%d, elapsed=%.2fs, error=%s",
+                route_label,
+                attempt,
+                BOOKING_URL_FETCH_MAX_ATTEMPTS,
+                perf_counter() - started_at,
+                exc,
+            )
+            if attempt == BOOKING_URL_FETCH_MAX_ATTEMPTS:
+                result_logger.warning("Final round-trip booking fetch failed: %s", exc)
+                return None
     booking_url = booking_links[0] if booking_links else None
     logger.info(
         "Finished round-trip booking URL fetch: route=%s, found=%s, links=%d, elapsed=%.2fs",

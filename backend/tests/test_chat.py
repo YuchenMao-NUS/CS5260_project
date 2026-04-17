@@ -670,6 +670,68 @@ def test_resolve_booking_url_keeps_older_result_sets_addressable(monkeypatch):
     assert seen_destinations == ["TYO", "LON"]
 
 
+def test_resolve_booking_url_prefers_saved_link_from_response(monkeypatch):
+    """Saved booking URLs from the original response should be reused directly."""
+
+    def fail_fetch_booking_url_for_choice(choice, flight_query):
+        raise AssertionError("lazy booking lookup should not run when response already has a link")
+
+    monkeypatch.setattr(booking_service, "fetch_booking_url_for_choice", fail_fetch_booking_url_for_choice)
+
+    booking_service.store_result_set(
+        "saved-link-session",
+        "saved-link-results",
+        {"from_airport": "SIN", "to_airports": ["TYO"], "trip": "one_way"},
+        flight_choices=[
+            {
+                "from_airport": "SIN",
+                "to_airport": "TYO",
+                "trip": "one_way",
+                "booking_url": "https://booking.example/already-saved",
+            }
+        ],
+    )
+
+    booking_url = booking_service.resolve_booking_url("saved-link-session", "saved-link-results", "result-1")
+
+    assert booking_url == "https://booking.example/already-saved"
+
+
+def test_fetch_one_way_booking_url_retries_once_with_short_timeout(monkeypatch):
+    """One-way booking lookup should use a 5-second timeout and retry once."""
+
+    calls: list[int] = []
+
+    def fake_asyncio_run(coroutine):
+        calls.append(filter_flights_module.BOOKING_URL_FETCH_TIMEOUT_MS)
+        coroutine.close()
+        if len(calls) == 1:
+            raise TimeoutError("first attempt timed out")
+        return ["https://booking.example/retried"]
+
+    monkeypatch.setattr(filter_flights_module.asyncio, "run", fake_asyncio_run)
+
+    flight_segment = SimpleNamespace(
+        from_airport=SimpleNamespace(code="SIN"),
+        to_airport=SimpleNamespace(code="TYO"),
+        flight_number_airline_code="SQ",
+        flight_number_numeric="638",
+        departure=SimpleNamespace(date=(2026, 5, 1)),
+    )
+
+    booking_url = filter_flights_module._fetch_one_way_booking_url(
+        from_airport="SIN",
+        to_airport="TYO",
+        departure_date="2026-05-01",
+        seat_class="economy",
+        passengers=1,
+        flight_result=[flight_segment],
+    )
+
+    assert booking_url == "https://booking.example/retried"
+    assert len(calls) == 2
+
+
 def test_extract_preference_merges_with_existing_state(monkeypatch):
     """Preference extraction should preserve prior values that were not updated this turn."""
 
