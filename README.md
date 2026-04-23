@@ -17,9 +17,17 @@
 1. Open in VS Code/Cursor
 2. "Reopen in Container"
 3. In terminal:
-   - Backend: `cd backend && uvicorn smartflight.main:app --reload --host 0.0.0.0 --port 8000`
+   - Backend: `cd backend && python -m uvicorn smartflight.main:app --reload --host 0.0.0.0 --port 8000`
    - Frontend: `cd frontend && npm run dev`
 4. Open http://localhost:5173
+
+If an existing container reports a missing Python package such as `ModuleNotFoundError: No module named 'mcp'`, rerun the setup script from the workspace root:
+
+```bash
+bash .devcontainer/post-create.sh
+```
+
+Alternatively, rebuild the container so VS Code runs the script automatically.
 
 **Option 2: Local**
 
@@ -28,8 +36,9 @@
 cd backend
 cp .env.example .env
 pip install -r requirements.txt
+pip install -e ../flights-search
 pip install -e .
-uvicorn smartflight.main:app --reload --port 8000
+python -m uvicorn smartflight.main:app --reload --port 8000
 
 # Frontend (new terminal)
 cd frontend

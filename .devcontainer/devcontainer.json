@@ -21,7 +21,8 @@
       ]
     }
   },
-  "postCreateCommand": "sudo mkdir -p /ms-playwright && sudo chown -R vscode:vscode /ms-playwright && cd backend && pip install -r requirements.txt && pip install -e . && python -m playwright install-deps chromium && python -m playwright install chromium && cd ../frontend && npm install",
+  "initializeCommand": "cp -n backend/.env.example backend/.env || true",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
   "forwardPorts": [8000, 5173],
   "portsAttributes": {
     "8000": { "label": "Backend API" },
