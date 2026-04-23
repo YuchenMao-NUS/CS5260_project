@@ -21,8 +21,14 @@ class ResultSetRecord(TypedDict):
     demo_flights: dict[str, dict]
 
 
+class LatestIntentRecord(TypedDict):
+    flight_query: dict
+    flight_preference: dict
+
+
 _result_sets_by_session: dict[str, dict[str, ResultSetRecord]] = {}
 _result_sets_lock = Lock()
+_latest_intent_by_session: dict[str, LatestIntentRecord] = {}
 _RESULT_SET_STORE_ROOT = settings.PROJECT_ROOT / "backend" / ".cache" / "result_sets"
 
 
@@ -134,12 +140,38 @@ def _get_result_set(session_id: str, result_set_id: str) -> ResultSetRecord | No
 def clear_session_results(session_id: str) -> None:
     with _result_sets_lock:
         _result_sets_by_session.pop(session_id, None)
+        _latest_intent_by_session.pop(session_id, None)
 
     prefix = f"{_stable_key(session_id)}-"
     if not _RESULT_SET_STORE_ROOT.exists():
         return
     for path in _RESULT_SET_STORE_ROOT.glob(f"{prefix}*.json"):
         path.unlink(missing_ok=True)
+
+
+def remember_latest_intent(
+    session_id: str,
+    flight_query: dict,
+    flight_preference: dict | None = None,
+) -> None:
+    if not flight_query:
+        return
+    with _result_sets_lock:
+        _latest_intent_by_session[session_id] = {
+            "flight_query": dict(flight_query or {}),
+            "flight_preference": dict(flight_preference or {}),
+        }
+
+
+def get_latest_intent(session_id: str) -> LatestIntentRecord | None:
+    with _result_sets_lock:
+        record = _latest_intent_by_session.get(session_id)
+        if record is None:
+            return None
+        return {
+            "flight_query": dict(record["flight_query"]),
+            "flight_preference": dict(record["flight_preference"]),
+        }
 
 
 def _choice_for_flight_id(flight_choices: list[dict], flight_id: str) -> dict | None:

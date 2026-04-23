@@ -39,6 +39,9 @@ DESTINATION_TO_PATTERN = re.compile(
     r"\bto\s+([a-zA-Z\s]+?)(?:$|\s+(?:next|this|tomorrow|today|on|under|below|less|more|above|around|about|with|for|return|round)\b)",
     re.I,
 )
+EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
+ALERT_HINTS = ("notify", "notify me", "email me", "send me", "alert me", "let me know")
+CANCEL_ALERT_HINTS = ("do not notify", "don't notify", "stop notify", "stop notifying", "cancel alert", "stop alert")
 
 
 def _resolve_session_id(session_id: str | None) -> str:
@@ -66,6 +69,7 @@ def _build_input_state(
         "user_context": user_context or {},
         "flight_query": previous_state.get("flight_query"),
         "flight_preference": previous_state.get("flight_preference"),
+        "alert_request": previous_state.get("alert_request"),
         "error_message": None,
         "flight_choices": None,
     }
@@ -233,6 +237,44 @@ def _infer_preference(
     return preference
 
 
+def _extract_email(text: str) -> str | None:
+    match = EMAIL_PATTERN.search(text or "")
+    return match.group(0).strip() if match else None
+
+
+def _infer_alert_request(message: str, previous_alert_request: dict | None) -> dict | None:
+    normalized = (message or "").lower()
+    email = _extract_email(message)
+    previous = dict(previous_alert_request or {})
+    enabled = bool(previous.get("enabled", False))
+    intent = previous.get("intent")
+
+    if any(hint in normalized for hint in CANCEL_ALERT_HINTS):
+        if email:
+            previous["email"] = email
+        previous["enabled"] = False
+        previous["intent"] = "cancel"
+        return previous
+
+    if any(hint in normalized for hint in ALERT_HINTS):
+        enabled = True
+        intent = "create"
+
+    if email:
+        previous["email"] = email
+        if any(hint in normalized for hint in ALERT_HINTS):
+            enabled = True
+            intent = "create"
+
+    if not enabled and not previous.get("email"):
+        return previous or None
+
+    previous["enabled"] = bool(enabled)
+    if intent:
+        previous["intent"] = intent
+    return previous
+
+
 def _fallback_result(
     message: str,
     user_context: dict | None,
@@ -246,6 +288,7 @@ def _fallback_result(
     previous_query = previous_state.get("flight_query") or {}
     previous_preference = dict(previous_state.get("flight_preference") or {})
     previous_history = list(previous_state.get("history") or [])
+    previous_alert_request = dict(previous_state.get("alert_request") or {})
     context_filters = list((user_context or {}).get("filters") or [])
 
     trip = _infer_trip(message, previous_query)
@@ -253,6 +296,7 @@ def _fallback_result(
     to_airports = _infer_destinations(message, previous_query, from_airport)
     departure_date, return_date = _infer_dates(previous_query, trip)
     inferred_preference = _infer_preference(message, previous_preference, context_filters)
+    inferred_alert_request = _infer_alert_request(message, previous_alert_request)
 
     if not to_airports:
         return {
@@ -262,6 +306,7 @@ def _fallback_result(
             "user_context": user_context or {},
             "flight_query": None,
             "flight_preference": inferred_preference,
+            "alert_request": inferred_alert_request,
             "error_message": (
                 "I couldn't resolve the destination into airport codes. "
                 "Please specify a city or airport."
@@ -278,6 +323,7 @@ def _fallback_result(
             "user_context": user_context or {},
             "flight_query": None,
             "flight_preference": inferred_preference,
+            "alert_request": inferred_alert_request,
             "error_message": (
                 f"Your origin and destination both seem to be {from_airport}. "
                 "Please specify a different destination."
@@ -303,6 +349,7 @@ def _fallback_result(
             "description_of_recommendation": previous_query.get("description_of_recommendation"),
         },
         "flight_preference": inferred_preference,
+        "alert_request": inferred_alert_request,
         "error_message": None,
         "flight_choices": None,
         "history": previous_history,

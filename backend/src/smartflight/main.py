@@ -10,11 +10,11 @@ from fastapi.staticfiles import StaticFiles
 
 from smartflight.config import settings
 from smartflight.logging_config import clear_request_context, configure_logging, set_request_context
+from smartflight.routers import chat
+from smartflight.services.alert_worker import start_alert_worker, stop_alert_worker
 
 configure_logging()
 logger = logging.getLogger(__name__)
-
-from smartflight.routers import chat  # noqa: E402
 
 
 class SPAStaticFiles(StaticFiles):
@@ -89,6 +89,16 @@ async def log_requests(request: Request, call_next):
     )
     clear_request_context()
     return response
+
+
+@app.on_event("startup")
+def startup_alert_worker() -> None:
+    start_alert_worker(settings.ALERT_CHECK_INTERVAL_SECONDS)
+
+
+@app.on_event("shutdown")
+def shutdown_alert_worker() -> None:
+    stop_alert_worker()
 
 
 @app.get("/health")

@@ -54,6 +54,7 @@ class AgentState(TypedDict):
     user_context: dict                             # Context passed from frontend (e.g. timezone, location)
     flight_query: Optional[FlightQuery]            # Extracted search parameters
     flight_preference: Optional[FlightPreference]  # Extracted user preferences
+    alert_request: Optional[dict]                  # Email alert request metadata from conversation
     flight_choices: Optional[List[FlightInformation]]
     error_message: Optional[str]                   # Node error message (e.g. missing origin)
     history: Optional[List[dict]]                  # history of turns

@@ -1,5 +1,6 @@
 from typing import List, Optional
 import logging
+import re
 
 from openai import OpenAI
 from pydantic import BaseModel
@@ -9,6 +10,10 @@ from smartflight.config import settings
 from smartflight.services.progress import emit_progress, raise_if_progress_cancelled
 
 logger = logging.getLogger(__name__)
+
+EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
+ALERT_HINTS = ("notify", "notify me", "email me", "send me", "alert me", "let me know")
+CANCEL_ALERT_HINTS = ("do not notify", "don't notify", "stop notify", "stop notifying", "cancel alert", "stop alert")
 
 
 class FlightPreferenceExtraction(BaseModel):
@@ -48,6 +53,45 @@ def _preference_from_filters(user_filters: list[dict]) -> dict[str, object]:
                 preference["preferred_airlines"] = [airline_code]
 
     return preference
+
+
+def _extract_email_fallback(user_input: str) -> str | None:
+    match = EMAIL_PATTERN.search(user_input or "")
+    return match.group(0).strip() if match else None
+
+
+def _infer_alert_request(user_input: str, existing_alert_request: dict | None) -> dict | None:
+    normalized = (user_input or "").lower()
+    alert_request = dict(existing_alert_request or {})
+    email = _extract_email_fallback(user_input)
+    enabled = bool(alert_request.get("enabled"))
+    intent = alert_request.get("intent")
+
+    if any(hint in normalized for hint in CANCEL_ALERT_HINTS):
+        if email:
+            alert_request["email"] = email
+        alert_request["enabled"] = False
+        alert_request["intent"] = "cancel"
+        return alert_request
+
+    if any(hint in normalized for hint in ALERT_HINTS):
+        enabled = True
+        intent = "create"
+
+    if email:
+        alert_request["email"] = email
+
+    if email and any(hint in normalized for hint in ALERT_HINTS):
+        enabled = True
+        intent = "create"
+
+    if not enabled and not alert_request.get("email"):
+        return alert_request or None
+
+    alert_request["enabled"] = enabled
+    if intent:
+        alert_request["intent"] = intent
+    return alert_request
 
 
 def _build_previous_context(history: Optional[List[dict]], max_turns: int = 5) -> str:
@@ -108,6 +152,7 @@ def extract_preference_node(state: AgentState) -> AgentState:
     user_input = state["user_input"]
     user_filters = state.get("user_context", {}).get("filters") or []
     existing_preference = state.get("flight_preference") or {}
+    existing_alert_request = state.get("alert_request") or {}
     history = state.get("history")
     previous_context = _build_previous_context(history)
 
@@ -173,6 +218,8 @@ Extraction rules:
 
     merged_preference.update(_preference_from_filters(user_filters))
 
+    merged_alert_request = _infer_alert_request(user_input, existing_alert_request)
+
     logger.info(
         "Preference extraction completed",
         extra={"choices_count": len([value for value in merged_preference.values() if value is not None])},
@@ -180,4 +227,5 @@ Extraction rules:
 
     return {
         "flight_preference": merged_preference,
+        "alert_request": merged_alert_request,
     }

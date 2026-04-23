@@ -16,6 +16,7 @@ from smartflight.routers import chat as chat_router
 from smartflight.services import booking as booking_service
 from smartflight.services import nlu as nlu_service
 from smartflight.services import progress as progress_service
+from smartflight.services import alerts as alert_service
 from smartflight.services.chat_formatting import format_demo_flight, format_graph_flight
 
 client = TestClient(app)
@@ -1155,3 +1156,434 @@ def test_format_demo_flight_prefers_structured_stop_fields_over_legacy_label():
     assert leg["stopAirports"] == ["KUL", "BKK"]
     assert leg["stops"] == "2 stops (KUL, BKK)"
 
+
+
+def test_chat_creates_alert_when_no_match_and_email_provided(monkeypatch):
+    """Chat should create an email alert when user asks for notification and no flights are found."""
+    alert_service.clear_all_alerts()
+
+    def fake_run_flight_search(message, user_context=None, session_id=None, progress_id=None):
+        return {
+            "flight_query": {
+                "trip": "one_way",
+                "from_airport": "SIN",
+                "to_airports": ["NRT"],
+                "departure_date": "2026-05-14",
+                "return_date": None,
+                "seat_classes": "economy",
+                "passengers": 1,
+                "is_multi_destination": False,
+                "description_of_recommendation": None,
+            },
+            "flight_preference": {"max_price": 300.0},
+            "alert_request": {"enabled": True, "email": "me@example.com"},
+            "flight_choices": [],
+            "error_message": None,
+        }
+
+    monkeypatch.setattr(chat_router, "run_flight_search", fake_run_flight_search)
+    monkeypatch.setattr(chat_router, "get_flights", lambda intent, use_demo=False: [])
+
+    resp = client.post(
+        "/api/chat",
+        json={"message": "Notify me at me@example.com when under 300 SGD", "session_id": "alert-session"},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["flights"] is None
+    assert payload["alertId"] is not None
+    assert payload["alertStatus"] == "active"
+    assert "me@example.com" in payload["reply"]
+
+    saved = alert_service.get_alert(payload["alertId"])
+    assert saved is not None
+    assert saved.email == "me@example.com"
+    assert saved.status == "active"
+
+
+def test_chat_does_not_create_alert_without_flight_query(monkeypatch):
+    """Chat should not create alert when notify intent exists but flight query is empty."""
+    alert_service.clear_all_alerts()
+
+    def fake_run_flight_search(message, user_context=None, session_id=None, progress_id=None):
+        return {
+            "flight_query": {},
+            "flight_preference": {"max_price": 79.0},
+            "alert_request": {"enabled": True, "email": "me@example.com"},
+            "flight_choices": [],
+            "error_message": None,
+        }
+
+    monkeypatch.setattr(chat_router, "run_flight_search", fake_run_flight_search)
+    monkeypatch.setattr(chat_router, "get_flights", lambda intent, use_demo=False: [])
+
+    resp = client.post(
+        "/api/chat",
+        json={"message": "notify me@example.com when available", "session_id": "alert-session-no-query"},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["flights"] is None
+    assert payload["alertId"] is None
+    assert payload["alertStatus"] is None
+    assert payload["reply"] == "No matching flights were found for your request."
+
+
+def test_chat_creates_alert_from_previous_session_query(monkeypatch):
+    """A notify-only follow-up should reuse prior session query to create alert."""
+    alert_service.clear_all_alerts()
+    calls = {"count": 0}
+
+    def fake_run_flight_search(message, user_context=None, session_id=None, progress_id=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return {
+                "flight_query": {
+                    "trip": "one_way",
+                    "from_airport": "SIN",
+                    "to_airports": ["NRT"],
+                    "departure_date": "2026-05-14",
+                    "return_date": None,
+                    "seat_classes": "economy",
+                    "passengers": 1,
+                    "is_multi_destination": False,
+                    "description_of_recommendation": None,
+                },
+                "flight_preference": {"max_price": 79.0},
+                "alert_request": None,
+                "flight_choices": [],
+                "error_message": None,
+            }
+        return {
+            "flight_query": {},
+            "flight_preference": {},
+            "alert_request": {"enabled": True, "email": "me@example.com"},
+            "flight_choices": [],
+            "error_message": None,
+        }
+
+    monkeypatch.setattr(chat_router, "run_flight_search", fake_run_flight_search)
+    monkeypatch.setattr(chat_router, "get_flights", lambda intent, use_demo=False: [])
+
+    first = client.post(
+        "/api/chat",
+        json={"message": "SIN to NRT under 79 SGD", "session_id": "alert-follow-up-session"},
+    )
+    assert first.status_code == 200
+    assert first.json()["alertId"] is None
+
+    second = client.post(
+        "/api/chat",
+        json={"message": "notify me@example.com when available", "session_id": "alert-follow-up-session"},
+    )
+    assert second.status_code == 200
+    payload = second.json()
+    assert payload["flights"] is None
+    assert payload["alertId"] is not None
+    assert payload["alertStatus"] == "active"
+    assert "me@example.com" in payload["reply"]
+
+    saved = alert_service.get_alert(payload["alertId"])
+    assert saved is not None
+    assert saved.email == "me@example.com"
+    assert saved.flight_query["from_airport"] == "SIN"
+    assert saved.flight_query["to_airports"] == ["NRT"]
+    assert saved.flight_preference["max_price"] == 79.0
+
+
+def test_chat_creates_alert_from_previous_query_even_when_second_turn_has_error(monkeypatch):
+    """Notify-only follow-up should still create alert when second turn returns error_message."""
+    alert_service.clear_all_alerts()
+    calls = {"count": 0}
+
+    def fake_run_flight_search(message, user_context=None, session_id=None, progress_id=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return {
+                "flight_query": {
+                    "trip": "one_way",
+                    "from_airport": "SIN",
+                    "to_airports": ["NRT"],
+                    "departure_date": "2026-05-14",
+                    "return_date": None,
+                    "seat_classes": "economy",
+                    "passengers": 1,
+                    "is_multi_destination": False,
+                    "description_of_recommendation": None,
+                },
+                "flight_preference": {"max_price": 310.0},
+                "alert_request": None,
+                "flight_choices": [],
+                "error_message": None,
+            }
+        return {
+            "flight_query": None,
+            "flight_preference": {},
+            "alert_request": {"enabled": True, "email": "me@example.com"},
+            "flight_choices": [],
+            "error_message": "I'm your personal flight assistant; currently, I can only help you search for and book flights. Do you have any travel plans?",
+        }
+
+    monkeypatch.setattr(chat_router, "run_flight_search", fake_run_flight_search)
+    monkeypatch.setattr(chat_router, "get_flights", lambda intent, use_demo=False: [])
+
+    first = client.post(
+        "/api/chat",
+        json={"message": "budget 310 sgd from SIN to NRT", "session_id": "alert-follow-up-error-session"},
+    )
+    assert first.status_code == 200
+    assert first.json()["alertId"] is None
+
+    second = client.post(
+        "/api/chat",
+        json={"message": "notify me@example.com when available", "session_id": "alert-follow-up-error-session"},
+    )
+    assert second.status_code == 200
+    payload = second.json()
+    assert payload["alertId"] is not None
+    assert payload["alertStatus"] == "active"
+    assert "I will notify me@example.com" in payload["reply"]
+
+
+def test_chat_creates_alert_when_error_turn_has_notify_only_in_message(monkeypatch):
+    """Router should fallback-parse notify+email from raw message when alert_request is absent."""
+    alert_service.clear_all_alerts()
+    calls = {"count": 0}
+
+    def fake_run_flight_search(message, user_context=None, session_id=None, progress_id=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return {
+                "flight_query": {
+                    "trip": "one_way",
+                    "from_airport": "SIN",
+                    "to_airports": ["NRT"],
+                    "departure_date": "2026-05-14",
+                    "return_date": None,
+                    "seat_classes": "economy",
+                    "passengers": 1,
+                    "is_multi_destination": False,
+                    "description_of_recommendation": None,
+                },
+                "flight_preference": {"max_price": 477.0},
+                "alert_request": None,
+                "flight_choices": [],
+                "error_message": None,
+            }
+        return {
+            "flight_query": None,
+            "flight_preference": {},
+            "alert_request": None,
+            "flight_choices": [],
+            "error_message": "I'm your personal flight assistant; currently, I can only help you search for and book flights. Do you have any travel plans?",
+        }
+
+    monkeypatch.setattr(chat_router, "run_flight_search", fake_run_flight_search)
+    monkeypatch.setattr(chat_router, "get_flights", lambda intent, use_demo=False: [])
+
+    first = client.post(
+        "/api/chat",
+        json={"message": "budget 477 SGD from SIN to NRT", "session_id": "alert-follow-up-guardrail-session"},
+    )
+    assert first.status_code == 200
+    assert first.json()["alertId"] is None
+
+    second = client.post(
+        "/api/chat",
+        json={"message": "notify eongenma@gmail.com when available", "session_id": "alert-follow-up-guardrail-session"},
+    )
+    assert second.status_code == 200
+    payload = second.json()
+    assert payload["alertId"] is not None
+    assert payload["alertStatus"] == "active"
+    assert "I will notify eongenma@gmail.com" in payload["reply"]
+    assert payload["intent"]["alert_detection"]["source"] == "regex_fallback"
+
+
+def test_email_test_endpoint_uses_request_recipient(monkeypatch):
+    """Email test endpoint should send to explicit request recipient."""
+    captured: dict[str, str] = {}
+
+    def fake_send_test_email(recipient: str):
+        captured["recipient"] = recipient
+
+    monkeypatch.setattr(chat_router, "send_test_email", fake_send_test_email)
+    monkeypatch.setattr(chat_router.settings, "ENABLE_EMAIL_TEST_ENDPOINT", True)
+
+    resp = client.post("/api/email/test", json={"to_email": "dest@example.com"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "sent"
+    assert resp.json()["recipient"] == "dest@example.com"
+    assert captured["recipient"] == "dest@example.com"
+
+
+def test_email_test_endpoint_falls_back_to_smtp_from_email(monkeypatch):
+    """Email test endpoint should default to SMTP_FROM_EMAIL when to_email is omitted."""
+    captured: dict[str, str] = {}
+
+    def fake_send_test_email(recipient: str):
+        captured["recipient"] = recipient
+
+    monkeypatch.setattr(chat_router, "send_test_email", fake_send_test_email)
+    monkeypatch.setattr(chat_router.settings, "ENABLE_EMAIL_TEST_ENDPOINT", True)
+    monkeypatch.setattr(chat_router.settings, "SMTP_FROM_EMAIL", "from@example.com")
+
+    resp = client.post("/api/email/test", json={})
+    assert resp.status_code == 200
+    assert resp.json()["recipient"] == "from@example.com"
+    assert captured["recipient"] == "from@example.com"
+
+
+def test_email_test_endpoint_requires_recipient(monkeypatch):
+    """Email test endpoint should return 400 when no recipient is available."""
+    monkeypatch.setattr(chat_router.settings, "ENABLE_EMAIL_TEST_ENDPOINT", True)
+    monkeypatch.setattr(chat_router.settings, "SMTP_FROM_EMAIL", "")
+
+    resp = client.post("/api/email/test", json={})
+    assert resp.status_code == 400
+    assert "No recipient provided" in resp.json()["detail"]
+
+
+def test_email_test_endpoint_uses_querystring_recipient(monkeypatch):
+    """Email test endpoint should prefer querystring to_email over request body."""
+    captured: dict[str, str] = {}
+
+    def fake_send_test_email(recipient: str):
+        captured["recipient"] = recipient
+
+    monkeypatch.setattr(chat_router, "send_test_email", fake_send_test_email)
+    monkeypatch.setattr(chat_router.settings, "ENABLE_EMAIL_TEST_ENDPOINT", True)
+
+    resp = client.post("/api/email/test?to_email=query@example.com", json={"to_email": "body@example.com"})
+    assert resp.status_code == 200
+    assert resp.json()["recipient"] == "query@example.com"
+    assert captured["recipient"] == "query@example.com"
+
+
+def test_email_test_endpoint_returns_404_when_disabled(monkeypatch):
+    """Email test endpoint should be unavailable unless explicitly enabled."""
+    monkeypatch.setattr(chat_router.settings, "ENABLE_EMAIL_TEST_ENDPOINT", False)
+
+    resp = client.post("/api/email/test", json={"to_email": "dest@example.com"})
+    assert resp.status_code == 404
+    assert "disabled" in resp.json()["detail"].lower()
+
+
+def test_chat_cancel_alerts_from_follow_up_message(monkeypatch):
+    """Cancel intent should cancel existing active alerts for the session/email."""
+    alert_service.clear_all_alerts()
+    alert = alert_service.create_alert(
+        session_id="cancel-alert-session",
+        email="dest@example.com",
+        flight_query={"from_airport": "SIN", "to_airports": ["NRT"]},
+        flight_preference={"max_price": 500.0},
+    )
+    assert alert.status == "active"
+
+    monkeypatch.setattr(
+        chat_router,
+        "run_flight_search",
+        lambda *_args, **_kwargs: {
+            "flight_query": None,
+            "flight_preference": None,
+            "alert_request": {"intent": "cancel", "enabled": False, "email": "dest@example.com"},
+            "flight_choices": [],
+            "error_message": "I'm your personal flight assistant; currently, I can only help you search for and book flights. Do you have any travel plans?",
+        },
+    )
+    monkeypatch.setattr(chat_router, "get_flights", lambda intent, use_demo=False: [])
+
+    resp = client.post(
+        "/api/chat",
+        json={"message": "don't notify dest@example.com anymore", "session_id": "cancel-alert-session"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["alertStatus"] == "cancelled"
+    assert "cancelled" in payload["reply"].lower()
+
+    saved = alert_service.get_alert(alert.id)
+    assert saved is not None
+    assert saved.status == "cancelled"
+
+
+def test_alerts_list_endpoint_filters_by_session_id():
+    alert_service.clear_all_alerts()
+    keep = alert_service.create_alert(
+        session_id="session-a",
+        email="a@example.com",
+        flight_query={"from_airport": "SIN", "to_airports": ["NRT"]},
+        flight_preference={"max_price": 500.0},
+        metadata={"source": "chat"},
+    )
+    alert_service.create_alert(
+        session_id="session-b",
+        email="b@example.com",
+        flight_query={"from_airport": "SIN", "to_airports": ["HND"]},
+        flight_preference={"max_price": 400.0},
+        metadata={"source": "chat"},
+    )
+
+    resp = client.get("/api/alerts?session_id=session-a")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == keep.id
+    assert data[0]["session_id"] == "session-a"
+    assert data[0]["email"] == "a@example.com"
+
+
+def test_alerts_list_endpoint_requires_session_id():
+    alert_service.clear_all_alerts()
+    resp = client.get("/api/alerts")
+    assert resp.status_code == 422
+
+
+def test_alert_detail_endpoint_returns_alert():
+    alert_service.clear_all_alerts()
+    alert = alert_service.create_alert(
+        session_id="session-a",
+        email="a@example.com",
+        flight_query={"from_airport": "SIN", "to_airports": ["NRT"]},
+        flight_preference={"max_price": 500.0},
+        metadata={"source": "chat"},
+    )
+
+    resp = client.get(f"/api/alerts/{alert.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == alert.id
+    assert data["status"] == "active"
+    assert data["flight_query"]["from_airport"] == "SIN"
+
+
+def test_alert_detail_endpoint_returns_404_when_missing():
+    alert_service.clear_all_alerts()
+    resp = client.get("/api/alerts/missing-alert-id")
+    assert resp.status_code == 404
+    assert "not found" in resp.json()["detail"].lower()
+
+
+def test_alert_service_returns_defensive_copy():
+    alert_service.clear_all_alerts()
+    created = alert_service.create_alert(
+        session_id="session-copy",
+        email="copy@example.com",
+        flight_query={"from_airport": "SIN", "to_airports": ["NRT"]},
+        flight_preference={"max_price": 500.0},
+        metadata={"source": "chat"},
+    )
+
+    fetched = alert_service.get_alert(created.id)
+    assert fetched is not None
+    fetched.flight_query["from_airport"] = "XXX"
+    fetched.flight_preference["max_price"] = 1.0
+    fetched.metadata["source"] = "tampered"
+
+    refetched = alert_service.get_alert(created.id)
+    assert refetched is not None
+    assert refetched.flight_query["from_airport"] == "SIN"
+    assert refetched.flight_preference["max_price"] == 500.0
+    assert refetched.metadata["source"] == "chat"
