@@ -7,6 +7,7 @@ from time import perf_counter
 import logging
 
 from smartflight.agent.state import AgentState, FlightInformation, FlightQuery
+from smartflight.logging_config import copy_request_context
 from smartflight.services.flights_mcp import (
     DEFAULT_TOOL_TIMEOUT_SECONDS,
     FlightsMcpError,
@@ -201,9 +202,10 @@ def _collect_parallel_route_results(route_tasks, *, max_concurrency: int):
     completed_count = 0
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        future_to_index = {
-            executor.submit(task["fn"]): idx for idx, task in enumerate(route_tasks)
-        }
+        future_to_index = {}
+        for idx, task in enumerate(route_tasks):
+            task_context = copy_request_context()
+            future_to_index[executor.submit(task_context.run, task["fn"])] = idx
 
         for future in as_completed(future_to_index):
             idx = future_to_index[future]
@@ -218,7 +220,11 @@ def _collect_parallel_route_results(route_tasks, *, max_concurrency: int):
                         f"Finished {route_tasks[idx]['display_label']} ({completed_count}/{len(route_tasks)})...",
                     )
             except Exception as exc:
-                logger.warning("Skipping route %s due to error: %s", route_label, exc)
+                logger.warning(
+                    "Route search failed",
+                    extra={"operation": "search_flights", "to_airport": route_tasks[idx].get("to_airport")},
+                    exc_info=True,
+                )
                 ordered_results[idx] = []
 
     return ordered_results
@@ -236,6 +242,17 @@ def _search_one_way_route(
 ) -> list[FlightInformation]:
     route_label = f"{from_airport} -> {to_airport} on {departure_date}"
     started_at = perf_counter()
+    logger.info(
+        "Route search started",
+        extra={
+            "from_airport": from_airport,
+            "to_airport": to_airport,
+            "departure_date": departure_date,
+            "trip": "one_way",
+            "operation": "search_flights",
+            "provider": "mcp",
+        },
+    )
 
     if is_progress_cancelled(progress_id):
         return []
@@ -274,10 +291,17 @@ def _search_one_way_route(
     ]
 
     logger.info(
-        "Completed one-way MCP route search: %s, results=%d, elapsed=%.2fs",
-        route_label,
-        len(flight_choices),
-        perf_counter() - started_at,
+        "Route search completed",
+        extra={
+            "from_airport": from_airport,
+            "to_airport": to_airport,
+            "departure_date": departure_date,
+            "trip": "one_way",
+            "results_count": len(flight_choices),
+            "elapsed_ms": round((perf_counter() - started_at) * 1000, 1),
+            "operation": "search_flights",
+            "provider": "mcp",
+        },
     )
     return flight_choices
 
@@ -308,6 +332,7 @@ def search_one_way(
         {
             "label": f"{from_airport} -> {to_airport} on {departure_date}",
             "display_label": f"{from_airport} -> {to_airport}",
+            "to_airport": to_airport,
             "progress_id": progress_id,
             "fn": lambda to_airport=to_airport, route_index=idx + 1, route_total=len(to_airports): _search_one_way_route(
                 from_airport=from_airport,
@@ -330,11 +355,14 @@ def search_one_way(
     flight_choices = [choice for route_result in route_results for choice in route_result]
 
     logger.info(
-        "Finished one-way MCP search: from=%s, destinations=%d, total_choices=%d, elapsed=%.2fs",
-        from_airport,
-        len(to_airports),
-        len(flight_choices),
-        perf_counter() - started_at,
+        "Flight search completed",
+        extra={
+            "from_airport": from_airport,
+            "departure_date": departure_date,
+            "trip": "one_way",
+            "results_count": len(flight_choices),
+            "elapsed_ms": round((perf_counter() - started_at) * 1000, 1),
+        },
     )
     return flight_choices
 
@@ -352,6 +380,18 @@ def _search_round_trip_route(
 ) -> list[FlightInformation]:
     route_label = f"{from_airport} <-> {to_airport} ({departure_date} / {return_date})"
     started_at = perf_counter()
+    logger.info(
+        "Route search started",
+        extra={
+            "from_airport": from_airport,
+            "to_airport": to_airport,
+            "departure_date": departure_date,
+            "return_date": return_date,
+            "trip": "round_trip",
+            "operation": "search_flights",
+            "provider": "mcp",
+        },
+    )
 
     if is_progress_cancelled(progress_id):
         return []
@@ -409,10 +449,18 @@ def _search_round_trip_route(
                 flight_choices.append(adapted)
 
     logger.info(
-        "Completed round-trip MCP route search: %s, combinations=%d, elapsed=%.2fs",
-        route_label,
-        len(flight_choices),
-        perf_counter() - started_at,
+        "Route search completed",
+        extra={
+            "from_airport": from_airport,
+            "to_airport": to_airport,
+            "departure_date": departure_date,
+            "return_date": return_date,
+            "trip": "round_trip",
+            "results_count": len(flight_choices),
+            "elapsed_ms": round((perf_counter() - started_at) * 1000, 1),
+            "operation": "search_flights",
+            "provider": "mcp",
+        },
     )
     return flight_choices
 
@@ -447,6 +495,7 @@ def search_round_trip(
         {
             "label": f"{from_airport} <-> {to_airport} ({departure_date} / {return_date})",
             "display_label": f"{from_airport} <-> {to_airport}",
+            "to_airport": to_airport,
             "progress_id": progress_id,
             "fn": lambda to_airport=to_airport, route_index=idx + 1, route_total=len(to_airports): _search_round_trip_route(
                 from_airport=from_airport,
@@ -470,11 +519,15 @@ def search_round_trip(
     flight_choices = [choice for route_result in route_results for choice in route_result]
 
     logger.info(
-        "Finished round-trip MCP search: from=%s, destinations=%d, total_choices=%d, elapsed=%.2fs",
-        from_airport,
-        len(to_airports),
-        len(flight_choices),
-        perf_counter() - started_at,
+        "Flight search completed",
+        extra={
+            "from_airport": from_airport,
+            "departure_date": departure_date,
+            "return_date": return_date,
+            "trip": "round_trip",
+            "results_count": len(flight_choices),
+            "elapsed_ms": round((perf_counter() - started_at) * 1000, 1),
+        },
     )
     return flight_choices
 

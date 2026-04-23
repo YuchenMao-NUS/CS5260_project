@@ -1,12 +1,15 @@
 """NLU: Parse user intent from natural language using LangGraph agent."""
 
 from datetime import datetime, timedelta
+import logging
 import re
 from uuid import uuid4
 
 from smartflight.agent.agent import graph
 from smartflight.config import settings
 from smartflight.services.progress import ProgressCancelledError
+
+logger = logging.getLogger(__name__)
 
 AIRPORT_HINTS: dict[str, tuple[str, ...]] = {
     "SIN": ("singapore", "asia/singapore", "sg"),
@@ -76,8 +79,18 @@ def _get_previous_state(session_id: str) -> dict:
 
 def _safe_get_previous_state(session_id: str) -> dict:
     try:
-        return _get_previous_state(session_id)
+        previous_state = _get_previous_state(session_id)
+        logger.info(
+            "Previous chat state found" if previous_state else "Previous chat state missing",
+            extra={"session_id": session_id},
+        )
+        return previous_state
     except Exception:
+        logger.warning(
+            "Previous chat state lookup failed",
+            extra={"session_id": session_id},
+            exc_info=True,
+        )
         return {}
 
 
@@ -226,6 +239,10 @@ def _fallback_result(
     previous_state: dict,
     error: Exception | str,
 ) -> dict:
+    logger.info(
+        "Fallback parser used",
+        extra={"session_id": previous_state.get("session_id")},
+    )
     previous_query = previous_state.get("flight_query") or {}
     previous_preference = dict(previous_state.get("flight_preference") or {})
     previous_history = list(previous_state.get("history") or [])
@@ -313,10 +330,23 @@ def run_flight_search(
 
     try:
         if not settings.openai_enabled:
+            logger.info(
+                "OpenAI disabled; using fallback parser",
+                extra={"session_id": resolved_session_id},
+            )
             raise ValueError("OPENAI_API_KEY not set")
 
+        logger.info("OpenAI extraction started", extra={"session_id": resolved_session_id})
         thread_config = {"configurable": {"thread_id": resolved_session_id}}
-        return graph.invoke(input_state, config=thread_config)
+        result = graph.invoke(input_state, config=thread_config)
+        logger.info(
+            "OpenAI extraction completed",
+            extra={
+                "session_id": resolved_session_id,
+                "flights_count": len(result.get("flight_choices") or []),
+            },
+        )
+        return result
     except ProgressCancelledError:
         raise
     except Exception as e:

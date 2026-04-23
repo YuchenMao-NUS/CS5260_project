@@ -114,9 +114,9 @@ def extract_query_node(state: AgentState) -> AgentState:
     history = state.get("history")
     previous_context = _build_previous_context(history)
 
-    logger.info("=== previous_context (query) ===")
+    logger.debug("=== previous_context (query) ===")
     for line in previous_context.split("\n"):
-        logger.info("  %s", line)
+        logger.debug("  %s", line)
 
     system_prompt = f"""
 You are a flight search assistant. Extract structured flight search parameters from the user's natural language input.
@@ -203,6 +203,17 @@ Return the fully merged final query state.
         "is_multi_destination": bool(extraction.is_multi_destination),
         "description_of_recommendation": extraction.description_of_recommendation,
     }
+
+    logger.info(
+        "Query extraction completed",
+        extra={
+            "from_airport": flight_query["from_airport"],
+            "to_airport": ",".join(flight_query["to_airports"]),
+            "departure_date": flight_query["departure_date"],
+            "return_date": flight_query["return_date"],
+            "trip": flight_query["trip"],
+        },
+    )
 
     return {
         "flight_query": flight_query,

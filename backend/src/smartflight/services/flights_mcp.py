@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
+import logging
 import os
+from time import perf_counter
 from typing import Any
 
 import anyio
@@ -14,6 +16,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from smartflight.config import settings
 
 DEFAULT_TOOL_TIMEOUT_SECONDS = 60
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -129,6 +132,7 @@ def call_tool(
     *,
     timeout_seconds: int = DEFAULT_TOOL_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
+    started_at = perf_counter()
     async def runner() -> dict[str, Any]:
         return await _call_tool(
             name,
@@ -136,7 +140,29 @@ def call_tool(
             timeout_seconds=timeout_seconds,
         )
 
-    return anyio.run(runner)
+    try:
+        payload = anyio.run(runner)
+    except Exception:
+        logger.warning(
+            "MCP tool call failed",
+            extra={
+                "provider": "mcp",
+                "operation": name,
+                "elapsed_ms": round((perf_counter() - started_at) * 1000, 1),
+            },
+            exc_info=True,
+        )
+        raise
+
+    logger.info(
+        "MCP tool call completed",
+        extra={
+            "provider": "mcp",
+            "operation": name,
+            "elapsed_ms": round((perf_counter() - started_at) * 1000, 1),
+        },
+    )
+    return payload
 
 
 def search_flights(

@@ -111,9 +111,9 @@ def extract_preference_node(state: AgentState) -> AgentState:
     history = state.get("history")
     previous_context = _build_previous_context(history)
 
-    logger.info("=== previous_context (preference) ===")
+    logger.debug("=== previous_context (preference) ===")
     for line in previous_context.split("\n"):
-        logger.info("  %s", line)
+        logger.debug("  %s", line)
 
     system_prompt = f"""
 You are a flight preference extraction assistant. Extract the user's soft preferences from their natural language input.
@@ -173,7 +173,10 @@ Extraction rules:
 
     merged_preference.update(_preference_from_filters(user_filters))
 
-    logger.info("[extract_preference] Updated Preferences: %s", merged_preference)
+    logger.info(
+        "Preference extraction completed",
+        extra={"choices_count": len([value for value in merged_preference.values() if value is not None])},
+    )
 
     return {
         "flight_preference": merged_preference,

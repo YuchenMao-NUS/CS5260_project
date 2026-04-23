@@ -2,26 +2,18 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+import os
 from time import perf_counter
 
 from smartflight.agent.state import AgentState, FlightInformation, FlightPreference, FlightQuery
 from smartflight.services.flights_mcp import FlightsMcpError, resolve_booking_urls
+from smartflight.logging_config import copy_request_context
 from smartflight.services.progress import emit_progress, is_progress_cancelled
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-)
-result_logger = logging.getLogger("result")
-result_logger.propagate = False
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(message)s"))
-result_logger.addHandler(handler)
-result_logger.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_BOOKING_URL_FETCH_CONCURRENCY = 5
-BOOKING_URL_FETCH_TIMEOUT_MS = 5_000
+BOOKING_URL_FETCH_TIMEOUT_MS = int(os.getenv("SMARTFLIGHT_BOOKING_URL_FETCH_TIMEOUT_MS", "45000"))
 BOOKING_URL_FETCH_MAX_ATTEMPTS = 2
 DEFAULT_LANGUAGE = "en-US"
 DEFAULT_CURRENCY = "SGD"
@@ -155,16 +147,32 @@ def _fetch_booking_url_for_choice(
             break
         except FlightsMcpError as exc:
             logger.warning(
-                "Booking URL fetch attempt failed: route=%s -> %s, attempt=%d/%d, error=%s",
-                choice["from_airport"],
-                choice["to_airport"],
-                attempt,
-                BOOKING_URL_FETCH_MAX_ATTEMPTS,
-                exc,
+                "Booking URL fetch attempt failed",
+                extra={
+                    "from_airport": choice["from_airport"],
+                    "to_airport": choice["to_airport"],
+                    "trip": choice["trip"],
+                    "retry_attempt": attempt,
+                    "operation": "resolve_booking_urls",
+                    "error_code": exc.code,
+                    "retryable": exc.retryable,
+                    "error_message": str(exc),
+                },
             )
             if attempt == BOOKING_URL_FETCH_MAX_ATTEMPTS:
                 return None
-    return booking_urls[0] if booking_urls else None
+    if not booking_urls:
+        logger.warning(
+            "Booking URL fetch returned no URLs",
+            extra={
+                "from_airport": choice["from_airport"],
+                "to_airport": choice["to_airport"],
+                "trip": choice["trip"],
+                "operation": "resolve_booking_urls",
+            },
+        )
+        return None
+    return booking_urls[0]
 
 
 def _get_total_price(choice: FlightInformation) -> float:
@@ -298,16 +306,18 @@ def _attach_booking_urls_in_parallel(
     completed_count = 0
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        future_to_index = {
-            executor.submit(
+        future_to_index = {}
+        for idx, choice in enumerate(choices):
+            task_context = copy_request_context()
+            future = executor.submit(
+                task_context.run,
                 _attach_booking_url,
                 choice,
                 flight_query,
                 progress_id,
                 f"{choice['from_airport']} -> {choice['to_airport']}",
-            ): idx
-            for idx, choice in enumerate(choices)
-        }
+            )
+            future_to_index[future] = idx
 
         for future in as_completed(future_to_index):
             idx = future_to_index[future]
@@ -320,8 +330,8 @@ def _attach_booking_urls_in_parallel(
                         "formatting_results",
                         f"Finished booking link check for {choices[idx]['from_airport']} -> {choices[idx]['to_airport']} ({completed_count}/{len(choices)})...",
                     )
-            except Exception as exc:
-                logger.warning("Booking URL attachment failed: %s", exc)
+            except Exception:
+                logger.warning("Booking URL attachment failed", exc_info=True)
                 ordered_choices[idx] = choices[idx]
 
     return [choice for choice in ordered_choices if choice is not None]
@@ -338,7 +348,7 @@ def _log_choice_segments(prefix: str, segments: list) -> None:
     for idx, segment in enumerate(segments, 1):
         departure = _segment_departure(segment)
         arrival = _segment_arrival(segment)
-        result_logger.info(
+        logger.debug(
             "    Leg %d:\n"
             "      %s -> %s\n"
             "      depart: %s %s\n"
@@ -365,6 +375,10 @@ def filter_flights_node(state: AgentState) -> AgentState:
     is_multi_destination = flight_query.get("is_multi_destination", False)
 
     if not flight_choices:
+        logger.info(
+            "No flight choices to filter",
+            extra={"choices_count": 0, "filtered_count": 0},
+        )
         return {
             "flight_choices": [],
             "error_message": None,
@@ -372,11 +386,26 @@ def filter_flights_node(state: AgentState) -> AgentState:
 
     try:
         emit_progress(progress_id, "formatting_results", "Ranking and filtering flight results...")
+        logger.info(
+            "Filtering flight choices started",
+            extra={
+                "choices_count": len(flight_choices),
+                "trip": flight_query.get("trip"),
+            },
+        )
 
         filtered_choices = [
             choice for choice in flight_choices if _matches_preferences(choice, flight_preference)
         ]
         if not filtered_choices:
+            logger.warning(
+                "No matching flights after preference filters",
+                extra={
+                    "choices_count": len(flight_choices),
+                    "filtered_count": 0,
+                    "trip": flight_query.get("trip"),
+                },
+            )
             return {"flight_choices": [], "error_message": None}
 
         prices = [_get_total_price(choice) for choice in filtered_choices]
@@ -412,17 +441,17 @@ def filter_flights_node(state: AgentState) -> AgentState:
             "error_message": None,
         }
 
-        result_logger.info("=== flight_query ===")
+        logger.debug("=== flight_query ===")
         for key, value in (result.get("flight_query") or {}).items():
-            result_logger.info("  %s: %s", key, value)
+            logger.debug("  %s: %s", key, value)
 
-        result_logger.info("\n=== flight_preference ===")
+        logger.debug("\n=== flight_preference ===")
         for key, value in (result.get("flight_preference") or {}).items():
-            result_logger.info("  %s: %s", key, value)
+            logger.debug("  %s: %s", key, value)
 
-        result_logger.info("\n=== flight_choices ===")
+        logger.debug("\n=== flight_choices ===")
         for i, choice in enumerate(result.get("flight_choices") or [], 1):
-            result_logger.info(
+            logger.debug(
                 "\n--- Option %d ---\n"
                 "  trip: %s\n"
                 "  route: %s -> %s\n"
@@ -434,9 +463,9 @@ def filter_flights_node(state: AgentState) -> AgentState:
                 choice["departure_date"],
             )
             if choice.get("return_date"):
-                result_logger.info("  return_date: %s", choice["return_date"])
+                logger.debug("  return_date: %s", choice["return_date"])
 
-            result_logger.info(
+            logger.debug(
                 "\n  [Outbound]\n"
                 "    airlines: %s\n"
                 "    price: %s\n"
@@ -450,7 +479,7 @@ def filter_flights_node(state: AgentState) -> AgentState:
             _log_choice_segments("Outbound", choice.get("flights") or [])
 
             if choice["trip"] == "round_trip":
-                result_logger.info(
+                logger.debug(
                     "\n  [Inbound]\n"
                     "    airlines: %s\n"
                     "    price: %s\n"
@@ -463,6 +492,14 @@ def filter_flights_node(state: AgentState) -> AgentState:
                 )
                 _log_choice_segments("Inbound", choice.get("flights_2") or [])
 
+        logger.info(
+            "Filtering flight choices completed",
+            extra={
+                "choices_count": len(flight_choices),
+                "filtered_count": len(sorted_choices),
+                "trip": flight_query.get("trip"),
+            },
+        )
         return result
     except Exception as exc:
         return {

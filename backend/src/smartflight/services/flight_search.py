@@ -1,5 +1,9 @@
 """Flight search - placeholder for later phase."""
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Phrases that trigger demo mode (returns mock flights before real API integration)
 DEMO_TRIGGERS = frozenset({"demo", "show demo", "test flights", "show sample", "sample flights"})
 
@@ -285,5 +289,8 @@ def get_flights(intent: dict, use_demo: bool = False) -> list[dict]:
     When use_demo=True, returns mock data for demo/testing.
     """
     if use_demo:
-        return _mock_flights(intent)
+        flights = _mock_flights(intent)
+        logger.info("Demo flight search completed", extra={"results_count": len(flights)})
+        return flights
+    logger.info("Demo flight search skipped", extra={"results_count": 0})
     return []

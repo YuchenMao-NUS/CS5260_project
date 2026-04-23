@@ -46,10 +46,12 @@ Determine if the user's input is related to searching, booking, inquiring about,
     )
 
     is_flight_related = response.choices[0].message.parsed.is_flight_related
-    logger.debug(f"[Guardrail] Input: {user_input} | Is Flight Related: {is_flight_related}")
+    logger.info(
+        "Intent guardrail completed",
+        extra={"message_length": len(user_input), "is_flight_related": is_flight_related},
+    )
 
     if not is_flight_related:
-        print("[Debug]: The user's input is related to flight tickets.")
         return {
             **state,
             "error_message": "I'm your personal flight assistant; currently, I can only help you search for and book flights. Do you have any travel plans?"

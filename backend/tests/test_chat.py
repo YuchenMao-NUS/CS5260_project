@@ -1,5 +1,6 @@
 """Tests for chat API."""
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -658,6 +659,30 @@ def test_resolve_booking_url_keeps_older_result_sets_addressable(monkeypatch):
     assert older_url == "https://booking.example/tyo"
     assert newer_url == "https://booking.example/lon"
     assert seen_destinations == ["TYO", "LON"]
+
+
+def test_resolve_booking_url_loads_saved_result_set_after_memory_loss(monkeypatch):
+    """Saved result sets should survive backend reloads that clear process memory."""
+
+    def fake_fetch_booking_url_for_choice(choice, flight_query):
+        return f"https://booking.example/{choice['to_airport'].lower()}"
+
+    cache_root = Path(".cache/test_result_sets")
+    monkeypatch.setattr(booking_service, "_RESULT_SET_STORE_ROOT", cache_root)
+    monkeypatch.setattr(booking_service, "fetch_booking_url_for_choice", fake_fetch_booking_url_for_choice)
+
+    booking_service.store_result_set(
+        "reload-session",
+        "reload-results",
+        {"from_airport": "SIN", "to_airports": ["JHB"], "trip": "one_way"},
+        flight_choices=[{"from_airport": "SIN", "to_airport": "JHB", "trip": "one_way"}],
+    )
+    booking_service._result_sets_by_session.clear()
+
+    booking_url = booking_service.resolve_booking_url("reload-session", "reload-results", "result-1")
+
+    assert booking_url == "https://booking.example/jhb"
+    booking_service.clear_session_results("reload-session")
 
 
 def test_resolve_booking_url_prefers_saved_link_from_response(monkeypatch):

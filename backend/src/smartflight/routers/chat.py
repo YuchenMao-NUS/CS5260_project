@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from asyncio import TimeoutError as AsyncTimeoutError, wait_for
 from collections.abc import Iterator
 from queue import Empty
 from threading import Thread
+from time import perf_counter
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
@@ -29,8 +31,10 @@ from smartflight.services.progress import (
     unregister_progress_queue,
 )
 from smartflight.services.recommendation_text import rephrase_recommendation_as_assistant
+from smartflight.logging_config import copy_request_context, get_request_context, set_request_context
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class ChatContext(BaseModel):
@@ -215,6 +219,15 @@ def _run_chat_request_sync(
     progress_id: str | None = None,
     on_event=None,
 ) -> ChatResponse:
+    start = perf_counter()
+    logger.info(
+        "Chat pipeline started",
+        extra={
+            "session_id": session_id,
+            "progress_id": progress_id,
+            "message_length": len(message),
+        },
+    )
     result = run_flight_search(message, user_context, session_id, progress_id=progress_id)
     response: ChatResponse | None = None
     for event in _iter_response_events(result, message, session_id, progress_id):
@@ -226,6 +239,17 @@ def _run_chat_request_sync(
     if response is None:
         raise RuntimeError("Chat pipeline completed without a response.")
 
+    elapsed_ms = (perf_counter() - start) * 1000
+    logger.info(
+        "Chat pipeline completed",
+        extra={
+            "session_id": session_id,
+            "progress_id": progress_id,
+            "flights_count": len(response.flights or []),
+            "result_set_id": response.resultSetId,
+            "elapsed_ms": round(elapsed_ms, 1),
+        },
+    )
     return response
 
 
@@ -236,9 +260,18 @@ def _serialize_stream_event(event: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-async def _stream_chat_request(http_request: Request, chat_request: ChatRequest):
+async def _stream_chat_request(
+    http_request: Request,
+    chat_request: ChatRequest,
+    request_context: dict[str, str],
+):
     user_context = chat_request.context.model_dump() if chat_request.context else {}
     progress_id = _new_progress_id(chat_request.session_id)
+    set_request_context(
+        request_id=request_context.get("request_id"),
+        session_id=chat_request.session_id,
+        progress_id=progress_id,
+    )
     progress_queue = register_progress_queue(progress_id)
 
     try:
@@ -254,6 +287,14 @@ async def _stream_chat_request(http_request: Request, chat_request: ChatRequest)
 
         def run_worker() -> None:
             try:
+                logger.info(
+                    "Streaming chat request received",
+                    extra={
+                        "session_id": chat_request.session_id,
+                        "progress_id": progress_id,
+                        "message_length": len(chat_request.message),
+                    },
+                )
                 emit_progress(
                     progress_id,
                     "analyzing_request",
@@ -267,15 +308,37 @@ async def _stream_chat_request(http_request: Request, chat_request: ChatRequest)
                     on_event,
                 )
             except ProgressCancelledError:
+                logger.info(
+                    "Streaming chat request cancelled",
+                    extra={
+                        "session_id": chat_request.session_id,
+                        "progress_id": progress_id,
+                    },
+                )
                 return
             except Exception as exc:
+                logger.exception(
+                    "Streaming chat request failed",
+                    extra={
+                        "session_id": chat_request.session_id,
+                        "progress_id": progress_id,
+                    },
+                )
                 emit_error(progress_id, str(exc))
 
-        worker = Thread(target=run_worker, daemon=True)
+        worker_context = copy_request_context()
+        worker = Thread(target=lambda: worker_context.run(run_worker), daemon=True)
         worker.start()
 
         while worker.is_alive() or not progress_queue.empty():
             if await http_request.is_disconnected():
+                logger.info(
+                    "Streaming client disconnected",
+                    extra={
+                        "session_id": chat_request.session_id,
+                        "progress_id": progress_id,
+                    },
+                )
                 cancel_progress(progress_id)
                 break
 
@@ -299,6 +362,14 @@ async def chat(request: ChatRequest):
     """
     try:
         user_context = request.context.model_dump() if request.context else {}
+        set_request_context(session_id=request.session_id)
+        logger.info(
+            "Chat request received",
+            extra={
+                "session_id": request.session_id,
+                "message_length": len(request.message),
+            },
+        )
         return await run_in_threadpool(
             _run_chat_request_sync,
             request.message,
@@ -307,16 +378,53 @@ async def chat(request: ChatRequest):
             None,
         )
     except Exception as e:
+        logger.exception(
+            "Chat request failed",
+            extra={"session_id": request.session_id},
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/chat/booking-url", response_model=BookingUrlResponse)
 async def booking_url(request: BookingUrlRequest):
-    booking_url_value = await run_in_threadpool(
-        resolve_booking_url,
-        request.session_id,
-        request.result_set_id,
-        request.flight_id,
+    set_request_context(session_id=request.session_id)
+    start = perf_counter()
+    logger.info(
+        "Booking URL request received",
+        extra={
+            "session_id": request.session_id,
+            "result_set_id": request.result_set_id,
+            "flight_id": request.flight_id,
+        },
+    )
+    try:
+        booking_url_value = await run_in_threadpool(
+            resolve_booking_url,
+            request.session_id,
+            request.result_set_id,
+            request.flight_id,
+        )
+    except HTTPException as exc:
+        logger.warning(
+            "Booking URL request failed",
+            extra={
+                "session_id": request.session_id,
+                "result_set_id": request.result_set_id,
+                "flight_id": request.flight_id,
+                "status_code": exc.status_code,
+                "elapsed_ms": round((perf_counter() - start) * 1000, 1),
+            },
+        )
+        raise
+
+    logger.info(
+        "Booking URL request completed",
+        extra={
+            "session_id": request.session_id,
+            "result_set_id": request.result_set_id,
+            "flight_id": request.flight_id,
+            "elapsed_ms": round((perf_counter() - start) * 1000, 1),
+        },
     )
     return BookingUrlResponse(bookingUrl=booking_url_value)
 
@@ -327,7 +435,7 @@ async def chat_stream(request: Request, payload: ChatRequest):
     Stream real backend progress updates and the final chat response.
     """
     return StreamingResponse(
-        _stream_chat_request(request, payload),
+        _stream_chat_request(request, payload, get_request_context()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

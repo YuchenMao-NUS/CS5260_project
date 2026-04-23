@@ -5,6 +5,10 @@ __pycache__/
 .venv/
 venv/
 .pixi/
+.pixi-cache/
+.pixi-home/
+pixi.toml
+pixi.lock
 node_modules/
 dist/
 *.log
@@ -17,3 +21,4 @@ build/
 
 .langgraph*/
 .gcloud/
+backend/.cache/
