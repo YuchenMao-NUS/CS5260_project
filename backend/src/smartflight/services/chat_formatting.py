@@ -16,7 +16,16 @@ def _extract_booking_url(choice: dict) -> str | None:
 
 def _segment_attr(segment, key: str):
     if isinstance(segment, dict):
-        return segment.get(key)
+        alias_map = {
+            "from_airport": "from_airport",
+            "to_airport": "to_airport",
+            "departure": "departure",
+            "arrival": "arrival",
+            "duration": "duration",
+            "flight_number_airline_code": "flight_number_airline_code",
+            "flight_number": "flight_number",
+        }
+        return segment.get(alias_map.get(key, key))
     return getattr(segment, key, None)
 
 
@@ -30,6 +39,8 @@ def _format_datetime(value) -> str:
     if isinstance(value, dict):
         date_value = value.get("date", ())
         time_value = value.get("time", ())
+    elif isinstance(value, str):
+        return value
     else:
         date_value = getattr(value, "date", None) or ()
         time_value = getattr(value, "time", None) or ()

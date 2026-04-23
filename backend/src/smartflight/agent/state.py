@@ -1,7 +1,4 @@
-from typing import TypedDict, Optional, List, Literal
-from smartflight.agent.fast_flights.model import SingleFlight
-
-
+from typing import Any, TypedDict, Optional, List, Literal
 
 class FlightQuery(TypedDict):
     trip: Literal["one_way", "round_trip"]
@@ -33,19 +30,21 @@ class FlightInformation(TypedDict):
     departure_date: str
     return_date: Optional[str]
     booking_url: Optional[str]
-    tfu_token: Optional[str]
+    outbound_selection_handle: Optional[str]
+    selected_leg: Optional[dict[str, Any]]
+    selected_itinerary: Optional[dict[str, Any]]
     # outbound ticket
     is_direct: bool
     airlines: List[str]
     price: float
     duration: int
-    flights: list[SingleFlight]
+    flights: list[dict[str, Any]]
     # inbound ticket
     is_direct_2: Optional[bool]
     airlines_2: Optional[List[str]]
     price_2: Optional[float]
     duration_2: Optional[int]
-    flights_2: Optional[list[SingleFlight]]
+    flights_2: Optional[list[dict[str, Any]]]
     
     
 class AgentState(TypedDict):

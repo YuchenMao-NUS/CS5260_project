@@ -3,14 +3,13 @@ uvicorn[standard]>=0.27.0
 pydantic>=2.5.0
 langgraph>=0.0.26
 openai>=1.12.0
-protobuf>=5.29.0
-primp>=0.15.0
-selectolax>=0.3.26
+anyio>=4.0
+mcp>=1.14.1
+httpx>=0.28.1
+playwright>=1.52.0
+protobuf>=6.31.1
+selectolax>=0.3.28
 typing-extensions>=4.12.0
-google>=3.0.0
-protobuf>=5.29.0
-selectolax>=0.3.26
-playwright>=1.40.0
 
 # Dev / test
 pytest>=7.0

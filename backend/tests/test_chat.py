@@ -20,21 +20,11 @@ from smartflight.services.chat_formatting import format_demo_flight, format_grap
 client = TestClient(app)
 
 
-def test_graph_memory_allows_fast_flights_msgpack_types():
-    """Checkpoint serde should explicitly allow fast-flight dataclass deserialization."""
+def test_graph_memory_uses_default_json_serializer():
+    """Checkpoint serde should no longer require fast-flight msgpack allowlists."""
 
-    allowed_types = getattr(agent_module.memory.serde, "_allowed_msgpack_modules", set())
-    expected_types = {
-        ("smartflight.agent.fast_flights.model", "Airline"),
-        ("smartflight.agent.fast_flights.model", "Alliance"),
-        ("smartflight.agent.fast_flights.model", "JsMetadata"),
-        ("smartflight.agent.fast_flights.model", "Airport"),
-        ("smartflight.agent.fast_flights.model", "SimpleDatetime"),
-        ("smartflight.agent.fast_flights.model", "SingleFlight"),
-        ("smartflight.agent.fast_flights.model", "CarbonEmission"),
-        ("smartflight.agent.fast_flights.model", "Flights"),
-    }
-    assert expected_types.issubset(allowed_types)
+    assert agent_module.memory is not None
+    assert agent_module.memory.serde is not None
 
 
 def _mock_chat_request_sync(monkeypatch, response: chat_router.ChatResponse) -> None:
@@ -697,39 +687,67 @@ def test_resolve_booking_url_prefers_saved_link_from_response(monkeypatch):
     assert booking_url == "https://booking.example/already-saved"
 
 
-def test_fetch_one_way_booking_url_retries_once_with_short_timeout(monkeypatch):
-    """One-way booking lookup should use a 5-second timeout and retry once."""
+def test_fetch_booking_url_for_choice_uses_mcp_and_returns_first_url(monkeypatch):
+    """Lazy booking lookup should resolve the first MCP booking URL for a selected itinerary."""
 
-    calls: list[int] = []
+    captured: dict | None = None
 
-    def fake_asyncio_run(coroutine):
-        calls.append(filter_flights_module.BOOKING_URL_FETCH_TIMEOUT_MS)
-        coroutine.close()
-        if len(calls) == 1:
-            raise TimeoutError("first attempt timed out")
-        return ["https://booking.example/retried"]
+    def fake_resolve_booking_urls(**kwargs):
+        nonlocal captured
+        captured = kwargs
+        return ["https://booking.example/retried", "https://booking.example/fallback"]
 
-    monkeypatch.setattr(filter_flights_module.asyncio, "run", fake_asyncio_run)
+    monkeypatch.setattr(filter_flights_module, "resolve_booking_urls", fake_resolve_booking_urls)
 
-    flight_segment = SimpleNamespace(
-        from_airport=SimpleNamespace(code="SIN"),
-        to_airport=SimpleNamespace(code="TYO"),
-        flight_number_airline_code="SQ",
-        flight_number_numeric="638",
-        departure=SimpleNamespace(date=(2026, 5, 1)),
-    )
-
-    booking_url = filter_flights_module._fetch_one_way_booking_url(
-        from_airport="SIN",
-        to_airport="TYO",
-        departure_date="2026-05-01",
-        seat_class="economy",
-        passengers=1,
-        flight_result=[flight_segment],
+    booking_url = filter_flights_module.fetch_booking_url_for_choice(
+        {
+            "trip": "one_way",
+            "from_airport": "SIN",
+            "to_airport": "TYO",
+            "departure_date": "2026-05-01",
+            "return_date": None,
+            "booking_url": None,
+            "outbound_selection_handle": None,
+            "selected_leg": {
+                "segments": [
+                    {
+                        "origin_airport": "SIN",
+                        "date": "2026-05-01",
+                        "destination_airport": "TYO",
+                        "marketing_airline_code": "SQ",
+                        "flight_number": "638",
+                    }
+                ]
+            },
+            "selected_itinerary": None,
+            "is_direct": True,
+            "airlines": ["SQ"],
+            "price": 420.0,
+            "duration": 430,
+            "flights": [],
+            "is_direct_2": None,
+            "airlines_2": None,
+            "price_2": None,
+            "duration_2": None,
+            "flights_2": None,
+        },
+        {
+            "trip": "one_way",
+            "from_airport": "SIN",
+            "to_airports": ["TYO"],
+            "departure_date": "2026-05-01",
+            "return_date": None,
+            "seat_classes": "economy",
+            "passengers": 1,
+            "is_multi_destination": False,
+            "description_of_recommendation": None,
+        },
     )
 
     assert booking_url == "https://booking.example/retried"
-    assert len(calls) == 2
+    assert captured is not None
+    assert captured["trip_type"] == "one-way"
+    assert captured["legs"][0]["origin_airport"] == "SIN"
 
 
 def test_extract_preference_merges_with_existing_state(monkeypatch):

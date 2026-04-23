@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flights-search"
+version = "0.1.0"
+description = "Typed Google Flights search and booking-link resolution."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "OpenAI Codex" },
+]
+dependencies = [
+  "httpx>=0.28.1",
+  "mcp>=1.14.1",
+  "playwright>=1.52.0",
+  "protobuf>=6.31.1",
+  "selectolax>=0.3.28",
+]
+
+[project.scripts]
+flights-search-mcp = "flights_search_mcp.server:main"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.basedpyright]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+include = ["src", "tests"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+[tool.pixi.pypi-dependencies]
+flights-search = { path = ".", editable = true }
+
+[tool.pixi.feature.dev.pypi-dependencies]
+basedpyright = ">=1.29.1"
+pytest = ">=8.3.5"
+ruff = ">=0.11.7"
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+local = { features = ["dev"], solve-group = "default" }
+
+[tool.pixi.tasks]
+test = "PYTHONPATH=src python -m unittest discover -s tests"
+test-unit = "PYTHONPATH=src python -m unittest discover -s tests"
+lint = "ruff check ."
+typecheck = "basedpyright"
+format = "ruff format ."
+docs-check = "PYTHONPATH=src python -m compileall src tests"

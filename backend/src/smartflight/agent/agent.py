@@ -103,18 +103,7 @@ builder.add_edge("filter_flights", END)
 
 # Initialize memory manager
 memory = MemorySaver(
-    serde=JsonPlusSerializer(
-        allowed_msgpack_modules=[
-            ("smartflight.agent.fast_flights.model", "Airline"),
-            ("smartflight.agent.fast_flights.model", "Alliance"),
-            ("smartflight.agent.fast_flights.model", "JsMetadata"),
-            ("smartflight.agent.fast_flights.model", "Airport"),
-            ("smartflight.agent.fast_flights.model", "SimpleDatetime"),
-            ("smartflight.agent.fast_flights.model", "SingleFlight"),
-            ("smartflight.agent.fast_flights.model", "CarbonEmission"),
-            ("smartflight.agent.fast_flights.model", "Flights"),
-        ]
-    )
+    serde=JsonPlusSerializer()
 )
 # Inject memory into the compiled graph
 graph = builder.compile(checkpointer=memory)

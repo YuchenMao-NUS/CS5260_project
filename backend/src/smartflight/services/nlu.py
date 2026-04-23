@@ -47,6 +47,7 @@ def _build_input_state(
     user_context: dict | None,
     session_id: str,
     progress_id: str | None,
+    previous_state: dict | None = None,
 ) -> dict:
     """
     Build only the fresh per-turn input state.
@@ -54,11 +55,14 @@ def _build_input_state(
     Previous graph state will be restored automatically by LangGraph
     via the checkpointer using thread_id.
     """
+    previous_state = previous_state or {}
     return {
         "session_id": session_id,
         "progress_id": progress_id,
         "user_input": message,
         "user_context": user_context or {},
+        "flight_query": previous_state.get("flight_query"),
+        "flight_preference": previous_state.get("flight_preference"),
         "error_message": None,
         "flight_choices": None,
     }
@@ -298,11 +302,13 @@ def run_flight_search(
     Run the full flight agent pipeline and return the graph state.
     """
     resolved_session_id = _resolve_session_id(session_id)
+    previous_state = _safe_get_previous_state(resolved_session_id)
     input_state = _build_input_state(
         message,
         user_context,
         resolved_session_id,
         progress_id,
+        previous_state,
     )
 
     try:
@@ -314,7 +320,6 @@ def run_flight_search(
     except ProgressCancelledError:
         raise
     except Exception as e:
-        previous_state = _safe_get_previous_state(resolved_session_id)
         return _fallback_result(message, user_context, previous_state, e)
 
 

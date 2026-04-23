@@ -8,9 +8,18 @@ version = "0.1.0"
 description = "SmartFlight - Intelligent Flight-Discovery Agent"
 requires-python = ">=3.10"
 dependencies = [
+    "anyio>=4.0",
     "fastapi>=0.109.0",
+    "httpx>=0.28.1",
+    "langgraph>=0.0.26",
+    "mcp>=1.14.1",
+    "openai>=1.12.0",
+    "playwright>=1.52.0",
+    "protobuf>=6.31.1",
     "uvicorn[standard]>=0.27.0",
     "pydantic>=2.5.0",
+    "selectolax>=0.3.28",
+    "typing-extensions>=4.12.0",
 ]
 
 [project.optional-dependencies]
@@ -21,3 +30,23 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+[tool.pixi.pypi-dependencies]
+smartflight = { path = ".", editable = true }
+flights-search = { path = "../flights-search", editable = true }
+
+[tool.pixi.feature.dev.pypi-dependencies]
+pytest = ">=7.0"
+httpx = ">=0.26.0"
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+
+[tool.pixi.tasks]
+test = "pytest tests"
+compile = "python -m compileall src ../flights-search/src"

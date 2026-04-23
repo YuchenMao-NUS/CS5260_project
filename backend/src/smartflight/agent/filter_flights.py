@@ -1,29 +1,21 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from smartflight.agent.state import *
-from smartflight.agent.fast_flights import (
-    FlightQuery as SearchFlightQuery,
-    Passengers,
-    SelectedFlight,
-    create_query,
-)
-from smartflight.agent.fast_flights.browser_capture import fetch_booking_links_for_query
-from smartflight.services.progress import emit_progress, is_progress_cancelled
+from __future__ import annotations
 
-import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from time import perf_counter
 
-# 普通日志（带时间等）
+from smartflight.agent.state import AgentState, FlightInformation, FlightPreference, FlightQuery
+from smartflight.services.flights_mcp import FlightsMcpError, resolve_booking_urls
+from smartflight.services.progress import emit_progress, is_progress_cancelled
+
 logging.basicConfig(
-    level=logging.INFO,  # 改成 DEBUG 可以看更详细日志
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
-# ✅ 专门用于“最终输出”的 logger
 result_logger = logging.getLogger("result")
-result_logger.propagate = False  # ❗关键：不要走 root logger
-
+result_logger.propagate = False
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(message)s"))  # ❗只输出内容
+handler.setFormatter(logging.Formatter("%(message)s"))
 result_logger.addHandler(handler)
 result_logger.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,216 +23,149 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_BOOKING_URL_FETCH_CONCURRENCY = 5
 BOOKING_URL_FETCH_TIMEOUT_MS = 5_000
 BOOKING_URL_FETCH_MAX_ATTEMPTS = 2
+DEFAULT_LANGUAGE = "en-US"
+DEFAULT_CURRENCY = "SGD"
 
 
-def _get_seat(seat_class: str) -> str:
-    seat_map = {
-        "economy": "economy",
-        "business": "business",
-        "first": "first",
-        "premium-economy": "premium-economy",
+def _segment_attr(segment, key: str):
+    if isinstance(segment, dict):
+        return segment.get(key)
+    return getattr(segment, key, None)
+
+
+def _airport_code(airport) -> str | None:
+    if isinstance(airport, dict):
+        return airport.get("code") or airport.get("airport")
+    return getattr(airport, "code", None) or getattr(airport, "airport", None)
+
+
+def _date_value(value) -> tuple[int, int, int] | None:
+    if isinstance(value, dict):
+        date = value.get("date")
+    else:
+        date = getattr(value, "date", None)
+    if isinstance(date, list):
+        date = tuple(date)
+    if isinstance(date, tuple) and len(date) == 3:
+        return (int(date[0]), int(date[1]), int(date[2]))
+    return None
+
+
+def _time_value(value) -> tuple[int, int] | None:
+    if isinstance(value, dict):
+        time = value.get("time")
+    else:
+        time = getattr(value, "time", None)
+    if isinstance(time, list):
+        time = tuple(time)
+    if isinstance(time, tuple) and len(time) >= 2:
+        return (int(time[0]), int(time[1]))
+    return None
+
+
+def _segment_duration(segment) -> int:
+    duration = _segment_attr(segment, "duration")
+    return int(duration or 0)
+
+
+def _segment_airline_code(segment) -> str | None:
+    if isinstance(segment, dict):
+        return segment.get("flight_number_airline_code")
+    return getattr(segment, "flight_number_airline_code", None)
+
+
+def _segment_flight_number(segment) -> str | None:
+    if isinstance(segment, dict):
+        return segment.get("flight_number_numeric") or segment.get("flight_number")
+    return getattr(segment, "flight_number_numeric", None) or getattr(segment, "flight_number", None)
+
+
+def _segment_departure(segment):
+    return _segment_attr(segment, "departure")
+
+
+def _segment_arrival(segment):
+    return _segment_attr(segment, "arrival")
+
+
+def _build_booking_itinerary(choice: FlightInformation) -> dict | None:
+    if choice["trip"] == "round_trip":
+        itinerary = choice.get("selected_itinerary")
+        return dict(itinerary) if isinstance(itinerary, dict) else itinerary
+
+    selected_leg = choice.get("selected_leg")
+    if not selected_leg:
+        return None
+    return {"legs": [selected_leg]}
+
+
+def _build_booking_legs(choice: FlightInformation) -> list[dict[str, str]]:
+    legs = [
+        {
+            "date": choice["departure_date"],
+            "origin_airport": choice["from_airport"],
+            "destination_airport": choice["to_airport"],
+        }
+    ]
+    if choice["trip"] == "round_trip" and choice.get("return_date"):
+        legs.append(
+            {
+                "date": choice["return_date"],
+                "origin_airport": choice["to_airport"],
+                "destination_airport": choice["from_airport"],
+            }
+        )
+    return legs
+
+
+def _to_mcp_trip_type(trip: str) -> str:
+    return "round-trip" if trip == "round_trip" else "one-way"
+
+
+def _to_mcp_passengers(passengers: int) -> dict[str, int]:
+    return {
+        "adults": max(1, int(passengers)),
+        "children": 0,
+        "infants_in_seat": 0,
+        "infants_on_lap": 0,
     }
-    if seat_class not in seat_map:
-        raise ValueError(f"Unsupported seat class: {seat_class}")
-    return seat_map[seat_class]
 
 
-def _format_segment_date(segment) -> str | None:
-    departure = getattr(segment, "departure", None)
-    date_value = getattr(departure, "date", None)
-    if isinstance(date_value, list):
-        date_value = tuple(date_value)
-    if not isinstance(date_value, tuple) or len(date_value) != 3:
-        return None
-    year, month, day = date_value
-    return f"{year:04d}-{month:02d}-{day:02d}"
-
-
-def _build_selected_segments(itinerary) -> list[SelectedFlight]:
-    selected_segments: list[SelectedFlight] = []
-    segments = itinerary if isinstance(itinerary, list) else getattr(itinerary, "flights", []) or []
-    for segment in segments:
-        from_airport = getattr(getattr(segment, "from_airport", None), "code", None)
-        to_airport = getattr(getattr(segment, "to_airport", None), "code", None)
-        airline_code = getattr(segment, "flight_number_airline_code", None)
-        flight_number = getattr(segment, "flight_number_numeric", None)
-        flight_date = _format_segment_date(segment)
-        if (
-            not from_airport
-            or not to_airport
-            or not airline_code
-            or not flight_number
-            or not flight_date
-        ):
-            return []
-        selected_segments.append(
-            SelectedFlight(
-                from_airport=from_airport,
-                date=flight_date,
-                to_airport=to_airport,
-                airline_code=airline_code,
-                flight_number=flight_number,
-            )
-        )
-    return selected_segments
-
-
-def _fetch_one_way_booking_url(
-    *,
-    from_airport: str,
-    to_airport: str,
-    departure_date: str,
-    seat_class: str,
-    passengers: int,
-    flight_result,
+def _fetch_booking_url_for_choice(
+    choice: FlightInformation,
+    flight_query: FlightQuery,
 ) -> str | None:
-    route_label = f"{from_airport} -> {to_airport} on {departure_date}"
-    started_at = perf_counter()
-    selected_segments = _build_selected_segments(flight_result)
-    if not selected_segments:
-        logger.info(
-            "Skipping one-way booking URL fetch: route=%s, reason=no_selected_segments",
-            route_label,
-        )
+    itinerary = _build_booking_itinerary(choice)
+    if not itinerary:
         return None
 
-    booking_query = create_query(
-        flights=[
-            SearchFlightQuery(
-                date=departure_date,
-                from_airport=from_airport,
-                to_airport=to_airport,
-            )
-        ],
-        seat=_get_seat(seat_class),
-        trip="one-way",
-        passengers=Passengers(adults=passengers),
-        language="en-US",
-        currency="SGD",
-        selected_flight_segments=selected_segments,
-    )
-    logger.info(
-        "Starting one-way booking URL fetch: route=%s, segments=%d",
-        route_label,
-        len(selected_segments),
-    )
-    booking_links: list[str] = []
+    booking_urls: list[str] = []
     for attempt in range(1, BOOKING_URL_FETCH_MAX_ATTEMPTS + 1):
         try:
-            booking_links = asyncio.run(
-                fetch_booking_links_for_query(
-                    booking_query,
-                    headless=True,
-                    timeout_ms=BOOKING_URL_FETCH_TIMEOUT_MS,
-                )
+            booking_urls = resolve_booking_urls(
+                itinerary=itinerary,
+                legs=_build_booking_legs(choice),
+                trip_type=_to_mcp_trip_type(choice["trip"]),
+                passengers=_to_mcp_passengers(flight_query["passengers"]),
+                seat=flight_query["seat_classes"],
+                language=DEFAULT_LANGUAGE,
+                currency=DEFAULT_CURRENCY,
+                timeout_seconds=max(1, BOOKING_URL_FETCH_TIMEOUT_MS // 1000),
             )
             break
-        except Exception as exc:
+        except FlightsMcpError as exc:
             logger.warning(
-                "One-way booking URL fetch attempt failed: route=%s, attempt=%d/%d, elapsed=%.2fs, error=%s",
-                route_label,
+                "Booking URL fetch attempt failed: route=%s -> %s, attempt=%d/%d, error=%s",
+                choice["from_airport"],
+                choice["to_airport"],
                 attempt,
                 BOOKING_URL_FETCH_MAX_ATTEMPTS,
-                perf_counter() - started_at,
                 exc,
             )
             if attempt == BOOKING_URL_FETCH_MAX_ATTEMPTS:
-                result_logger.warning("Final one-way booking fetch failed: %s", exc)
                 return None
-    booking_url = booking_links[0] if booking_links else None
-    logger.info(
-        "Finished one-way booking URL fetch: route=%s, found=%s, links=%d, elapsed=%.2fs",
-        route_label,
-        bool(booking_url),
-        len(booking_links),
-        perf_counter() - started_at,
-    )
-    return booking_url
+    return booking_urls[0] if booking_urls else None
 
-
-def _fetch_round_trip_booking_url(
-    *,
-    from_airport: str,
-    to_airport: str,
-    departure_date: str,
-    return_date: str,
-    seat_class: str,
-    passengers: int,
-    tfu_token: str | None,
-    outbound_option,
-    inbound_option,
-) -> str | None:
-    route_label = f"{from_airport} <-> {to_airport} ({departure_date} / {return_date})"
-    started_at = perf_counter()
-    outbound_segments = _build_selected_segments(outbound_option)
-    inbound_segments = _build_selected_segments(inbound_option)
-    if not outbound_segments or not inbound_segments:
-        logger.info(
-            "Skipping round-trip booking URL fetch: route=%s, reason=missing_selected_segments",
-            route_label,
-        )
-        return None
-
-    booking_query = create_query(
-        flights=[
-            SearchFlightQuery(
-                date=departure_date,
-                from_airport=from_airport,
-                to_airport=to_airport,
-            ),
-            SearchFlightQuery(
-                date=return_date,
-                from_airport=to_airport,
-                to_airport=from_airport,
-            ),
-        ],
-        seat=_get_seat(seat_class),
-        trip="round-trip",
-        passengers=Passengers(adults=passengers),
-        language="en-US",
-        currency="SGD",
-        tfu=tfu_token,
-        selected_outbound_segments=outbound_segments,
-        selected_return_segments=inbound_segments,
-    )
-    logger.info(
-        "Starting round-trip booking URL fetch: route=%s, outbound_segments=%d, inbound_segments=%d",
-        route_label,
-        len(outbound_segments),
-        len(inbound_segments),
-    )
-    booking_links: list[str] = []
-    for attempt in range(1, BOOKING_URL_FETCH_MAX_ATTEMPTS + 1):
-        try:
-            booking_links = asyncio.run(
-                fetch_booking_links_for_query(
-                    booking_query,
-                    headless=True,
-                    timeout_ms=BOOKING_URL_FETCH_TIMEOUT_MS,
-                )
-            )
-            break
-        except Exception as exc:
-            logger.warning(
-                "Round-trip booking URL fetch attempt failed: route=%s, attempt=%d/%d, elapsed=%.2fs, error=%s",
-                route_label,
-                attempt,
-                BOOKING_URL_FETCH_MAX_ATTEMPTS,
-                perf_counter() - started_at,
-                exc,
-            )
-            if attempt == BOOKING_URL_FETCH_MAX_ATTEMPTS:
-                result_logger.warning("Final round-trip booking fetch failed: %s", exc)
-                return None
-    booking_url = booking_links[0] if booking_links else None
-    logger.info(
-        "Finished round-trip booking URL fetch: route=%s, found=%s, links=%d, elapsed=%.2fs",
-        route_label,
-        bool(booking_url),
-        len(booking_links),
-        perf_counter() - started_at,
-    )
-    return booking_url
 
 def _get_total_price(choice: FlightInformation) -> float:
     if choice["trip"] == "one_way":
@@ -255,10 +180,6 @@ def _get_total_duration(choice: FlightInformation) -> int:
 
 
 def _is_direct_effective(choice: FlightInformation) -> bool:
-    """
-    For one-way: direct means outbound is direct.
-    For round-trip: direct means both outbound and inbound are direct.
-    """
     if choice["trip"] == "one_way":
         return bool(choice["is_direct"])
     return bool(choice["is_direct"]) and bool(choice["is_direct_2"])
@@ -274,62 +195,33 @@ def _effective_stop_bounds(choice: FlightInformation) -> tuple[int, int]:
     outbound_stops = _leg_stop_count(choice.get("flights") or [])
     if choice["trip"] == "one_way":
         return outbound_stops, outbound_stops
-
     inbound_stops = _leg_stop_count(choice.get("flights_2") or [])
     return min(outbound_stops, inbound_stops), max(outbound_stops, inbound_stops)
 
 
 def _all_airlines(choice: FlightInformation) -> list[str]:
-    airlines = list(choice.get("airlines") or [])
-    airlines_2 = list(choice.get("airlines_2") or [])
-    return airlines + airlines_2
+    return list(choice.get("airlines") or []) + list(choice.get("airlines_2") or [])
 
 
-def _matches_preferences(
-    choice: FlightInformation,
-    pref: FlightPreference,
-) -> bool:
-    """
-    Hard filtering only.
-    """
+def _matches_preferences(choice: FlightInformation, pref: FlightPreference) -> bool:
     total_price = _get_total_price(choice)
     total_duration = _get_total_duration(choice)
-
-    direct_only = pref.get("direct_only")
-    max_price = pref.get("max_price")
-    min_price = pref.get("min_price")
-    max_duration = pref.get("max_duration")
-    min_duration = pref.get("min_duration")
-    max_stops = pref.get("max_stops")
-    min_stops = pref.get("min_stops")
-    preferred_airlines = pref.get("preferred_airlines")
     effective_min_stops, effective_max_stops = _effective_stop_bounds(choice)
 
-    # 1) direct_only is a hard constraint only when True
-    if direct_only is True and not _is_direct_effective(choice):
+    if pref.get("direct_only") is True and not _is_direct_effective(choice):
         return False
-
-    if max_stops is not None and effective_max_stops > max_stops:
+    if pref.get("max_stops") is not None and effective_max_stops > pref["max_stops"]:
         return False
-    if min_stops is not None and effective_min_stops < min_stops:
+    if pref.get("min_stops") is not None and effective_min_stops < pref["min_stops"]:
         return False
-
-    # 2) price hard constraints
-    if max_price is not None and total_price > max_price:
+    if pref.get("max_price") is not None and total_price > pref["max_price"]:
         return False
-    if min_price is not None and total_price < min_price:
+    if pref.get("min_price") is not None and total_price < pref["min_price"]:
         return False
-
-    # 3) duration hard constraints
-    if max_duration is not None and total_duration > max_duration:
+    if pref.get("max_duration") is not None and total_duration > pref["max_duration"]:
         return False
-    if min_duration is not None and total_duration < min_duration:
+    if pref.get("min_duration") is not None and total_duration < pref["min_duration"]:
         return False
-
-    # 4) preferred_airlines:
-    # treat as a soft preference, not a hard constraint
-    # so do NOT filter here
-
     return True
 
 
@@ -341,20 +233,6 @@ def _compute_rank_score(
     duration_min: int,
     duration_max: int,
 ) -> float:
-    """
-    Lower score = better.
-
-    Ranking strategy:
-    - cheaper is better
-    - shorter is better
-    - direct is better
-    - airline preference match is better
-
-    Normalization:
-    - price_norm in [0,1]
-    - duration_norm in [0,1]
-    """
-
     total_price = _get_total_price(choice)
     total_duration = _get_total_duration(choice)
     is_direct = _is_direct_effective(choice)
@@ -363,35 +241,16 @@ def _compute_rank_score(
     airline_match = 0
     if preferred_airlines:
         choice_airlines = set(_all_airlines(choice))
-        if any(a in choice_airlines for a in preferred_airlines):
+        if any(airline in choice_airlines for airline in preferred_airlines):
             airline_match = 1
 
-    # normalize price
-    if price_max == price_min:
-        price_norm = 0.0
-    else:
-        price_norm = (total_price - price_min) / (price_max - price_min)
-
-    # normalize duration
-    if duration_max == duration_min:
-        duration_norm = 0.0
-    else:
-        duration_norm = (total_duration - duration_min) / (duration_max - duration_min)
-
-    # penalties / bonuses
+    price_norm = 0.0 if price_max == price_min else (total_price - price_min) / (price_max - price_min)
+    duration_norm = (
+        0.0 if duration_max == duration_min else (total_duration - duration_min) / (duration_max - duration_min)
+    )
     direct_penalty = 0.0 if is_direct else 0.15
     airline_penalty = 0.0 if airline_match else (0.08 if preferred_airlines else 0.0)
-
-    # weighted score
-    # price is slightly more important than duration
-    score = (
-        0.55 * price_norm
-        + 0.30 * duration_norm
-        + direct_penalty
-        + airline_penalty
-    )
-
-    return score
+    return 0.55 * price_norm + 0.30 * duration_norm + direct_penalty + airline_penalty
 
 
 def _attach_booking_url(
@@ -402,14 +261,8 @@ def _attach_booking_url(
 ) -> FlightInformation:
     if is_progress_cancelled(progress_id):
         return choice
-
     if choice.get("booking_url"):
         return choice
-
-    started_at = perf_counter()
-    trip = choice["trip"]
-    route_label = f"{choice['from_airport']} -> {choice['to_airport']}"
-    booking_url = None
 
     if progress_id and progress_label:
         emit_progress(
@@ -418,47 +271,12 @@ def _attach_booking_url(
             f"Fetching booking link for {progress_label}...",
         )
 
-    if choice["trip"] == "one_way":
-        booking_url = _fetch_one_way_booking_url(
-            from_airport=choice["from_airport"],
-            to_airport=choice["to_airport"],
-            departure_date=choice["departure_date"],
-            seat_class=flight_query["seat_classes"],
-            passengers=flight_query["passengers"],
-            flight_result=choice.get("flights") or [],
-        )
-    elif choice["trip"] == "round_trip" and choice.get("return_date"):
-        booking_url = _fetch_round_trip_booking_url(
-            from_airport=choice["from_airport"],
-            to_airport=choice["to_airport"],
-            departure_date=choice["departure_date"],
-            return_date=choice["return_date"],
-            seat_class=flight_query["seat_classes"],
-            passengers=flight_query["passengers"],
-            tfu_token=choice.get("tfu_token"),
-            outbound_option=choice.get("flights") or [],
-            inbound_option=choice.get("flights_2") or [],
-        )
-
-    logger.info(
-        "Attached booking URL: trip=%s, route=%s, found=%s, elapsed=%.2fs",
-        trip,
-        route_label,
-        bool(booking_url),
-        perf_counter() - started_at,
-    )
-    return {
-        **choice,
-        "booking_url": booking_url,
-    }
+    booking_url = _fetch_booking_url_for_choice(choice, flight_query)
+    return {**choice, "booking_url": booking_url}
 
 
-def fetch_booking_url_for_choice(
-    choice: FlightInformation,
-    flight_query: FlightQuery,
-) -> str | None:
-    enriched_choice = _attach_booking_url(choice, flight_query)
-    return enriched_choice.get("booking_url")
+def fetch_booking_url_for_choice(choice: FlightInformation, flight_query: FlightQuery) -> str | None:
+    return _attach_booking_url(choice, flight_query).get("booking_url")
 
 
 def _bounded_concurrency(task_count: int, max_concurrency: int) -> int:
@@ -475,16 +293,9 @@ def _attach_booking_urls_in_parallel(
     if not choices:
         return choices
 
-    started_at = perf_counter()
     ordered_choices: list[FlightInformation | None] = [None] * len(choices)
     worker_count = _bounded_concurrency(len(choices), max_concurrency)
     completed_count = 0
-
-    logger.info(
-        "Starting parallel booking URL attachment: choices=%d, workers=%d",
-        len(choices),
-        worker_count,
-    )
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         future_to_index = {
@@ -500,8 +311,6 @@ def _attach_booking_urls_in_parallel(
 
         for future in as_completed(future_to_index):
             idx = future_to_index[future]
-            choice = choices[idx]
-            route_label = f"{choice['from_airport']} -> {choice['to_airport']}"
             try:
                 ordered_choices[idx] = future.result()
                 if progress_id:
@@ -509,55 +318,46 @@ def _attach_booking_urls_in_parallel(
                     emit_progress(
                         progress_id,
                         "formatting_results",
-                        f"Finished booking link check for {choice['from_airport']} -> {choice['to_airport']} ({completed_count}/{len(choices)})...",
+                        f"Finished booking link check for {choices[idx]['from_airport']} -> {choices[idx]['to_airport']} ({completed_count}/{len(choices)})...",
                     )
             except Exception as exc:
-                logger.warning(
-                    "Booking URL attachment failed: trip=%s, route=%s, error=%s",
-                    choice["trip"],
-                    route_label,
-                    exc,
-                )
-                ordered_choices[idx] = choice
+                logger.warning("Booking URL attachment failed: %s", exc)
+                ordered_choices[idx] = choices[idx]
 
-    attached_choices = [choice for choice in ordered_choices if choice is not None]
-    success_count = sum(1 for choice in attached_choices if choice.get("booking_url"))
-    logger.info(
-        "Finished parallel booking URL attachment: choices=%d, attached=%d, workers=%d, elapsed=%.2fs",
-        len(attached_choices),
-        success_count,
-        worker_count,
-        perf_counter() - started_at,
-    )
-    return attached_choices
+    return [choice for choice in ordered_choices if choice is not None]
 
 
-def _keep_best_option_per_destination(
-    choices: list[FlightInformation],
-) -> list[FlightInformation]:
+def _keep_best_option_per_destination(choices: list[FlightInformation]) -> list[FlightInformation]:
     best_by_destination: dict[str, FlightInformation] = {}
     for choice in choices:
-        to_airport = choice["to_airport"]
-        if to_airport not in best_by_destination:
-            best_by_destination[to_airport] = choice
+        best_by_destination.setdefault(choice["to_airport"], choice)
     return list(best_by_destination.values())
 
 
-def filter_flights_node(state: AgentState) -> AgentState:
-    """
-    Filter and sort flight_choices using flight_preference.
+def _log_choice_segments(prefix: str, segments: list) -> None:
+    for idx, segment in enumerate(segments, 1):
+        departure = _segment_departure(segment)
+        arrival = _segment_arrival(segment)
+        result_logger.info(
+            "    Leg %d:\n"
+            "      %s -> %s\n"
+            "      depart: %s %s\n"
+            "      arrive: %s %s\n"
+            "      duration: %s min\n"
+            "      flight_no: %s",
+            idx,
+            _airport_code(_segment_attr(segment, "from_airport")),
+            _airport_code(_segment_attr(segment, "to_airport")),
+            _date_value(departure),
+            _time_value(departure),
+            _date_value(arrival),
+            _time_value(arrival),
+            _segment_duration(segment),
+            _segment_flight_number(segment),
+        )
 
-    Behavior:
-    - If no flight_choices, return as-is
-    - If no flight_preference, still sort by a default ranking:
-        cheaper first, then shorter, then direct
-    - Hard constraints:
-        direct_only=True, price range, duration range
-    - Soft preferences:
-        preferred_airlines
-    - If flight_query.is_multi_destination=True:
-        keep only the best ticket for each destination
-    """
+
+def filter_flights_node(state: AgentState) -> AgentState:
     flight_choices = state.get("flight_choices")
     flight_preference = state.get("flight_preference") or {}
     flight_query = state.get("flight_query") or {}
@@ -571,37 +371,21 @@ def filter_flights_node(state: AgentState) -> AgentState:
         }
 
     try:
-        emit_progress(
-            progress_id,
-            "formatting_results",
-            "Ranking and filtering flight results...",
-        )
+        emit_progress(progress_id, "formatting_results", "Ranking and filtering flight results...")
 
-        # Step 1: hard filtering
         filtered_choices = [
-            choice
-            for choice in flight_choices
-            if _matches_preferences(choice, flight_preference)
+            choice for choice in flight_choices if _matches_preferences(choice, flight_preference)
         ]
-
-        # If everything got filtered out, return empty list instead of failing
         if not filtered_choices:
-            return {
-                # **state,
-                "flight_choices": [],
-                "error_message": None,
-            }
+            return {"flight_choices": [], "error_message": None}
 
-        # Step 2: compute normalization range from filtered results
-        prices = [_get_total_price(c) for c in filtered_choices]
-        durations = [_get_total_duration(c) for c in filtered_choices]
-
+        prices = [_get_total_price(choice) for choice in filtered_choices]
+        durations = [_get_total_duration(choice) for choice in filtered_choices]
         price_min = min(prices) if prices else 0.0
         price_max = max(prices) if prices else 0.0
         duration_min = min(durations) if durations else 0
         duration_max = max(durations) if durations else 0
 
-        # Step 3: sort by score, then stable tie-breakers
         def sort_key(choice: FlightInformation):
             score = _compute_rank_score(
                 choice=choice,
@@ -611,24 +395,14 @@ def filter_flights_node(state: AgentState) -> AgentState:
                 duration_min=duration_min,
                 duration_max=duration_max,
             )
-
-            total_price = _get_total_price(choice)
-            total_duration = _get_total_duration(choice)
-            is_direct = _is_direct_effective(choice)
-
-            # lower is better for all tuple items
             return (
                 score,
-                total_price,
-                total_duration,
-                0 if is_direct else 1,
+                _get_total_price(choice),
+                _get_total_duration(choice),
+                0 if _is_direct_effective(choice) else 1,
             )
 
         sorted_choices = sorted(filtered_choices, key=sort_key)
-
-        # For destination recommendation flows, keep the top-ranked option per
-        # destination before fetching booking URLs so we only fetch links for
-        # the final shortlisted results.
         if is_multi_destination:
             sorted_choices = _keep_best_option_per_destination(sorted_choices)
 
@@ -639,100 +413,58 @@ def filter_flights_node(state: AgentState) -> AgentState:
         }
 
         result_logger.info("=== flight_query ===")
-        for k, v in result["flight_query"].items():
-            result_logger.info("  %s: %s", k, v)
+        for key, value in (result.get("flight_query") or {}).items():
+            result_logger.info("  %s: %s", key, value)
 
         result_logger.info("\n=== flight_preference ===")
-        for k, v in result["flight_preference"].items():
-            result_logger.info("  %s: %s", k, v)
-
-        if result["error_message"]:
-            result_logger.warning("\n=== error ===\n  %s", result["error_message"])
+        for key, value in (result.get("flight_preference") or {}).items():
+            result_logger.info("  %s: %s", key, value)
 
         result_logger.info("\n=== flight_choices ===")
+        for i, choice in enumerate(result.get("flight_choices") or [], 1):
+            result_logger.info(
+                "\n--- Option %d ---\n"
+                "  trip: %s\n"
+                "  route: %s -> %s\n"
+                "  departure_date: %s",
+                i,
+                choice["trip"],
+                choice["from_airport"],
+                choice["to_airport"],
+                choice["departure_date"],
+            )
+            if choice.get("return_date"):
+                result_logger.info("  return_date: %s", choice["return_date"])
 
-        flight_choices = result.get("flight_choices") or []
+            result_logger.info(
+                "\n  [Outbound]\n"
+                "    airlines: %s\n"
+                "    price: %s\n"
+                "    duration: %s min\n"
+                "    direct: %s",
+                choice["airlines"],
+                choice["price"],
+                choice["duration"],
+                choice["is_direct"],
+            )
+            _log_choice_segments("Outbound", choice.get("flights") or [])
 
-        if not flight_choices:
-            result_logger.info("  (no results)")
-        else:
-            for i, choice in enumerate(flight_choices[:10], 1):
-                # ===== 基本信息 =====
-                header = (
-                    f"\n--- Option {i} ---\n"
-                    f"  trip: {choice['trip']}\n"
-                    f"  route: {choice['from_airport']} -> {choice['to_airport']}\n"
-                    f"  departure_date: {choice['departure_date']}"
+            if choice["trip"] == "round_trip":
+                result_logger.info(
+                    "\n  [Inbound]\n"
+                    "    airlines: %s\n"
+                    "    price: %s\n"
+                    "    duration: %s min\n"
+                    "    direct: %s",
+                    choice.get("airlines_2"),
+                    choice.get("price_2"),
+                    choice.get("duration_2"),
+                    choice.get("is_direct_2"),
                 )
-
-                if choice["return_date"]:
-                    header += f"\n  return_date: {choice['return_date']}"
-
-                result_logger.info(header)
-
-                # ===== Outbound =====
-                outbound_info = (
-                    "\n  [Outbound]\n"
-                    f"    airlines: {choice['airlines']}\n"
-                    f"    price: {choice['price']}\n"
-                    f"    duration: {choice['duration']} min\n"
-                    f"    direct: {choice['is_direct']}"
-                )
-                result_logger.info(outbound_info)
-
-                for j, f in enumerate(choice["flights"], 1):
-                    result_logger.info(
-                        "    Leg %d:\n"
-                        "      %s -> %s\n"
-                        "      depart: %s %s\n"
-                        "      arrive: %s %s\n"
-                        "      duration: %s min\n"
-                        "      flight_no: %s",
-                        j,
-                        f.from_airport.code,
-                        f.to_airport.code,
-                        f.departure.date,
-                        f.departure.time,
-                        f.arrival.date,
-                        f.arrival.time,
-                        f.duration,
-                        f.flight_number,
-                    )
-
-                # ===== Inbound =====
-                if choice["trip"] == "round_trip":
-                    inbound_info = (
-                        "\n  [Inbound]\n"
-                        f"    airlines: {choice['airlines_2']}\n"
-                        f"    price: {choice['price_2']}\n"
-                        f"    duration: {choice['duration_2']} min\n"
-                        f"    direct: {choice['is_direct_2']}"
-                    )
-                    result_logger.info(inbound_info)
-
-                    for j, f in enumerate(choice["flights_2"] or [], 1):
-                        result_logger.info(
-                            "    Leg %d:\n"
-                            "      %s -> %s\n"
-                            "      depart: %s %s\n"
-                            "      arrive: %s %s\n"
-                            "      duration: %s min\n"
-                            "      flight_no: %s",
-                            j,
-                            f.from_airport.code,
-                            f.to_airport.code,
-                            f.departure.date,
-                            f.departure.time,
-                            f.arrival.date,
-                            f.arrival.time,
-                            f.duration,
-                            f.flight_number,
-                        )
+                _log_choice_segments("Inbound", choice.get("flights_2") or [])
 
         return result
-
-    except Exception as e:
+    except Exception as exc:
         return {
-            # **state,
-            "error_message": f"Flight filtering failed: {e}",
+            "error_message": f"Flight filtering failed: {exc}",
         }

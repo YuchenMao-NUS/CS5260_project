@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.pixi/
 node_modules/
 dist/
 *.log
