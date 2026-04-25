@@ -11,6 +11,7 @@ from smartflight.agent import agent as agent_module
 from smartflight.agent import extract_preference as extract_preference_module
 from smartflight.agent import extract_query as extract_query_module
 from smartflight.agent import filter_flights as filter_flights_module
+from smartflight.agent import guardrail as guardrail_module
 from smartflight.main import app
 from smartflight.routers import chat as chat_router
 from smartflight.services import booking as booking_service
@@ -27,6 +28,176 @@ def test_graph_memory_uses_default_json_serializer():
 
     assert agent_module.memory is not None
     assert agent_module.memory.serde is not None
+
+
+def test_guardrail_treats_short_answer_as_flight_followup(monkeypatch):
+    """Short clarification answers should be classified with previous flight context."""
+
+    captured_messages = None
+
+    class FakeCompletions:
+        def parse(self, model, messages, response_format):
+            nonlocal captured_messages
+            captured_messages = messages
+            context = "\n".join(message["content"] for message in messages)
+            parsed = response_format(
+                is_flight_related=(
+                    "Pending flight clarification" in context
+                    and messages[-1]["content"] == "suggest"
+                )
+            )
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))])
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key):
+            self.beta = SimpleNamespace(
+                chat=SimpleNamespace(completions=FakeCompletions())
+            )
+
+    monkeypatch.setattr(guardrail_module.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(guardrail_module, "OpenAI", FakeOpenAIClient)
+
+    result = guardrail_module.intent_guardrail_node(
+        {
+            "session_id": "europe-session",
+            "progress_id": None,
+            "user_input": "suggest",
+            "user_context": {},
+            "flight_query": None,
+            "clarification": {
+                "needed_fields": ["destination_choice"],
+                "question": (
+                    "For Europe, would you like to choose specific cities, "
+                    "or should I suggest 3-5 popular or lower-price cities?"
+                ),
+                "partial_flight_query": {
+                    "from_airport": "SIN",
+                    "destination_scope": "Europe",
+                    "departure_date": "2026-05-02",
+                    "trip": "one_way",
+                },
+                "can_search": False,
+            },
+            "flight_preference": None,
+            "flight_choices": None,
+            "error_message": None,
+            "history": [],
+        }
+    )
+
+    assert result["error_message"] is None
+    assert captured_messages is not None
+    assert "Pending flight clarification" in captured_messages[1]["content"]
+
+
+def test_guardrail_accepts_duration_answer_to_pending_clarification(monkeypatch):
+    """A duration-only reply should not be blocked as unrelated during flight clarification."""
+
+    class FakeCompletions:
+        def parse(self, model, messages, response_format):
+            raise AssertionError("pending clarification follow-up should bypass LLM guardrail")
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key):
+            self.beta = SimpleNamespace(
+                chat=SimpleNamespace(completions=FakeCompletions())
+            )
+
+    monkeypatch.setattr(guardrail_module.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(guardrail_module, "OpenAI", FakeOpenAIClient)
+
+    result = guardrail_module.intent_guardrail_node(
+        {
+            "session_id": "europe-duration-session",
+            "progress_id": None,
+            "user_input": "7 days",
+            "user_context": {},
+            "flight_query": None,
+            "clarification": {
+                "needed_fields": ["departure_date", "return_date_or_duration"],
+                "question": (
+                    "Sure, I need to confirm roughly when you want to depart, "
+                    "how many days you will stay or when you will return."
+                ),
+                "partial_flight_query": {
+                    "destination_scope": "Europe",
+                    "trip": "round_trip",
+                    "passengers": 1,
+                    "seat_classes": "economy",
+                },
+                "can_search": False,
+            },
+            "flight_preference": None,
+            "flight_choices": None,
+            "error_message": None,
+            "history": [],
+        }
+    )
+
+    assert result["error_message"] is None
+
+
+def test_extract_query_turns_suggest_followup_into_europe_destinations(monkeypatch):
+    """Suggesting cities for a broad region should produce searchable destinations."""
+
+    class FakeCompletions:
+        def parse(self, model, messages, response_format):
+            parsed = response_format(
+                trip="one_way",
+                from_airport="SIN",
+                from_airport_source="previous",
+                to_airports=None,
+                destination_scope="Europe",
+                destination_source="previous",
+                departure_date="2026-05-02",
+                departure_date_source="previous",
+                return_date=None,
+                return_date_source="not_applicable",
+                seat_classes="economy",
+                passengers=1,
+                is_multi_destination=True,
+                holiday_duration_intent=False,
+                description_of_recommendation="popular European city options",
+            )
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))])
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key):
+            self.beta = SimpleNamespace(
+                chat=SimpleNamespace(completions=FakeCompletions())
+            )
+
+    monkeypatch.setattr(extract_query_module.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(extract_query_module, "OpenAI", FakeOpenAIClient)
+
+    result = extract_query_module.extract_query_node(
+        {
+            "session_id": "europe-session",
+            "progress_id": None,
+            "user_input": "suggest",
+            "user_context": {},
+            "flight_query": None,
+            "clarification": {
+                "needed_fields": ["destination_choice"],
+                "partial_flight_query": {
+                    "from_airport": "SIN",
+                    "destination_scope": "Europe",
+                    "departure_date": "2026-05-02",
+                    "trip": "one_way",
+                },
+                "can_search": False,
+            },
+            "flight_preference": None,
+            "flight_choices": None,
+            "error_message": None,
+            "history": [],
+        }
+    )
+
+    assert result["error_message"] is None
+    assert result["clarification"] is None
+    assert result["flight_query"]["to_airports"] == ["LON", "PAR", "ROM", "AMS", "BCN"]
+    assert result["flight_query"]["is_multi_destination"] is True
 
 
 def _mock_chat_request_sync(monkeypatch, response: chat_router.ChatResponse) -> None:
@@ -174,6 +345,36 @@ def test_chat_same_origin_destination(monkeypatch):
     assert "different destination" in data["intent"].get("error_message").lower()
 
 
+def test_chat_returns_clarification_without_error(monkeypatch):
+    """Clarification turns should be normal assistant replies, not errors."""
+
+    def fake_run_flight_search(message, user_context, session_id, progress_id=None):
+        return {
+            "flight_query": None,
+            "clarification": {
+                "needed_fields": ["origin", "departure_date"],
+                "question": "Sure, I need to confirm where you will depart from, roughly when you want to depart.",
+                "partial_flight_query": {"to_airports": ["TYO"]},
+                "can_search": False,
+            },
+            "flight_preference": {},
+            "alert_request": None,
+            "error_message": None,
+            "flight_choices": None,
+        }
+
+    monkeypatch.setattr(chat_router, "run_flight_search", fake_run_flight_search)
+
+    resp = client.post("/api/chat", json={"message": "I want to go to Tokyo"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reply"].startswith("Sure, I need to confirm")
+    assert data["flights"] is None
+    assert data["intent"]["error_message"] is None
+    assert data["intent"]["clarification"]["can_search"] is False
+
+
 def test_chat_stream_emits_progress_and_completed(monkeypatch):
     """Streaming chat endpoint emits progress updates and a final payload."""
 
@@ -289,8 +490,8 @@ def test_run_flight_search_generates_unique_default_session_ids(monkeypatch):
     assert all(session_id.startswith("chat-") for session_id in captured_ids)
 
 
-def test_run_flight_search_falls_back_without_error(monkeypatch):
-    """Fallback parsing should still return a usable non-error result."""
+def test_run_flight_search_fallback_clarifies_missing_core_fields(monkeypatch):
+    """Fallback parsing should ask for missing required search fields instead of defaulting them."""
 
     def fake_invoke(input_state, config=None):
         raise RuntimeError("synthetic llm failure")
@@ -301,12 +502,15 @@ def test_run_flight_search_falls_back_without_error(monkeypatch):
     result = nlu_service.run_flight_search("demo flight to tokyo")
 
     assert result["error_message"] is None
-    assert result["flight_query"]["from_airport"] == "SIN"
-    assert result["flight_query"]["to_airports"] == ["TYO"]
+    assert result["flight_query"] is None
+    assert result["clarification"]["can_search"] is False
+    assert "origin" in result["clarification"]["needed_fields"]
+    assert "departure_date" in result["clarification"]["needed_fields"]
+    assert result["clarification"]["partial_flight_query"]["to_airports"] == ["TYO"]
 
 
 def test_run_flight_search_fallback_explicit_route_excludes_origin_from_destinations(monkeypatch):
-    """Fallback parsing should not include the explicit origin in destination results."""
+    """Fallback parsing should keep explicit route details but still ask for missing date."""
 
     def fake_invoke(input_state, config=None):
         raise RuntimeError("synthetic llm failure")
@@ -317,8 +521,10 @@ def test_run_flight_search_fallback_explicit_route_excludes_origin_from_destinat
     result = nlu_service.run_flight_search("Singapore to Tokyo")
 
     assert result["error_message"] is None
-    assert result["flight_query"]["from_airport"] == "SIN"
-    assert result["flight_query"]["to_airports"] == ["TYO"]
+    assert result["flight_query"] is None
+    assert result["clarification"]["partial_flight_query"]["from_airport"] == "SIN"
+    assert result["clarification"]["partial_flight_query"]["to_airports"] == ["TYO"]
+    assert "departure_date" in result["clarification"]["needed_fields"]
 
 
 def test_run_flight_search_fallback_same_origin_returns_validation_error(monkeypatch):
@@ -370,13 +576,157 @@ def test_run_flight_search_fallback_uses_context_and_previous_state(monkeypatch)
     )
 
     assert result["error_message"] is None
-    assert result["flight_query"]["from_airport"] == "SIN"
-    assert result["flight_query"]["to_airports"] == ["TYO"]
-    assert result["flight_query"]["passengers"] == 2
-    assert result["flight_query"]["seat_classes"] == "business"
+    assert result["flight_query"] is None
+    assert result["clarification"]["partial_flight_query"]["from_airport"] == "SIN"
+    assert result["clarification"]["partial_flight_query"]["to_airports"] == ["TYO"]
+    assert result["clarification"]["partial_flight_query"]["passengers"] == 2
+    assert result["clarification"]["partial_flight_query"]["seat_classes"] == "business"
+    assert "departure_date" in result["clarification"]["needed_fields"]
     assert result["flight_preference"]["preferred_airlines"] == ["SQ"]
     assert result["flight_preference"]["direct_only"] is True
     assert result["flight_preference"]["max_price"] == 500.0
+
+
+def test_run_flight_search_fallback_europe_trip_clarifies(monkeypatch):
+    """Broad holiday requests should ask for origin, date details, and duration."""
+
+    def fake_invoke(input_state, config=None):
+        raise RuntimeError("synthetic llm failure")
+
+    monkeypatch.setattr(nlu_service.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(nlu_service.graph, "invoke", fake_invoke)
+
+    result = nlu_service.run_flight_search("I want to go to Europe in June for a few days, not too expensive.")
+
+    assert result["error_message"] is None
+    assert result["flight_query"] is None
+    clarification = result["clarification"]
+    assert clarification["can_search"] is False
+    assert "origin" in clarification["needed_fields"]
+    assert "departure_date" in clarification["needed_fields"]
+    assert "return_date_or_duration" in clarification["needed_fields"]
+    assert clarification["partial_flight_query"]["destination_scope"] == "Europe"
+
+
+def test_run_flight_search_fallback_tokyo_with_context_asks_for_date(monkeypatch):
+    """Reliable location context can fill origin, but missing dates still require clarification."""
+
+    def fake_invoke(input_state, config=None):
+        raise RuntimeError("synthetic llm failure")
+
+    monkeypatch.setattr(nlu_service.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(nlu_service.graph, "invoke", fake_invoke)
+
+    result = nlu_service.run_flight_search(
+        "I want to go to Tokyo",
+        user_context={"location": "Singapore, Singapore", "timeZone": "Asia/Singapore"},
+    )
+
+    assert result["error_message"] is None
+    assert result["flight_query"] is None
+    assert result["clarification"]["partial_flight_query"]["from_airport"] == "SIN"
+    assert result["clarification"]["partial_flight_query"]["to_airports"] == ["TYO"]
+    assert result["clarification"]["needed_fields"] == ["departure_date"]
+
+
+def test_run_flight_search_fallback_june_tokyo_without_context_asks_for_origin(monkeypatch):
+    """A month-only date is incomplete and should not cause a SIN default."""
+
+    def fake_invoke(input_state, config=None):
+        raise RuntimeError("synthetic llm failure")
+
+    monkeypatch.setattr(nlu_service.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(nlu_service.graph, "invoke", fake_invoke)
+
+    result = nlu_service.run_flight_search("June to Tokyo")
+
+    assert result["error_message"] is None
+    assert result["flight_query"] is None
+    assert "origin" in result["clarification"]["needed_fields"]
+    assert "departure_date" in result["clarification"]["needed_fields"]
+    assert "from_airport" not in result["clarification"]["partial_flight_query"]
+
+
+def test_run_flight_search_fallback_one_way_does_not_ask_return(monkeypatch):
+    """One-way flight language should not require a return date."""
+
+    def fake_invoke(input_state, config=None):
+        raise RuntimeError("synthetic llm failure")
+
+    monkeypatch.setattr(nlu_service.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(nlu_service.graph, "invoke", fake_invoke)
+
+    result = nlu_service.run_flight_search(
+        "one way from Singapore to Tokyo June 12",
+        session_id="one-way-session",
+    )
+
+    assert result["error_message"] is None
+    assert result["flight_query"]["from_airport"] == "SIN"
+    assert result["flight_query"]["to_airports"] == ["TYO"]
+    assert result["flight_query"]["departure_date"] == "2026-06-12"
+    assert result["flight_query"]["return_date"] is None
+
+
+def test_run_flight_search_fallback_completes_previous_clarification(monkeypatch):
+    """A short follow-up should merge with pending clarification partial query."""
+
+    def fake_get_state(config):
+        return SimpleNamespace(
+            values={
+                "clarification": {
+                    "needed_fields": ["origin", "departure_date", "return_date_or_duration"],
+                    "question": (
+                        "Sure, I need to confirm where you will depart from, "
+                        "roughly when you want to depart, how many days you will stay or when you will return."
+                    ),
+                    "partial_flight_query": {
+                        "destination_scope": "Europe",
+                        "to_airports": ["LON"],
+                        "trip": "round_trip",
+                        "passengers": 1,
+                        "seat_classes": "economy",
+                    },
+                    "can_search": False,
+                }
+            }
+        )
+
+    def fake_invoke(input_state, config=None):
+        raise RuntimeError("synthetic llm failure")
+
+    monkeypatch.setattr(nlu_service.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(nlu_service.graph, "get_state", fake_get_state)
+    monkeypatch.setattr(nlu_service.graph, "invoke", fake_invoke)
+
+    result = nlu_service.run_flight_search("From Singapore, June 12 to 18", session_id="clarify-session")
+
+    assert result["error_message"] is None
+    assert result["clarification"] is None
+    assert result["flight_query"]["from_airport"] == "SIN"
+    assert result["flight_query"]["to_airports"] == ["LON"]
+    assert result["flight_query"]["departure_date"] == "2026-06-12"
+    assert result["flight_query"]["return_date"] == "2026-06-18"
+
+
+def test_run_flight_search_fallback_persists_clarification_for_followup(monkeypatch):
+    """Fallback clarification state should be available to the next same-session turn."""
+
+    monkeypatch.setattr(nlu_service.settings, "OPENAI_API_KEY", None)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    session_id = "fallback-memory-session"
+    first = nlu_service.run_flight_search("I want to go to Tokyo", session_id=session_id)
+    second = nlu_service.run_flight_search("From Singapore, June 12", session_id=session_id)
+
+    assert first["error_message"] is None
+    assert first["flight_query"] is None
+    assert first["clarification"]["partial_flight_query"]["to_airports"] == ["TYO"]
+    assert second["error_message"] is None
+    assert second["clarification"] is None
+    assert second["flight_query"]["from_airport"] == "SIN"
+    assert second["flight_query"]["to_airports"] == ["TYO"]
+    assert second["flight_query"]["departure_date"] == "2026-06-12"
 
 
 def test_run_flight_search_seeds_graph_with_checkpointed_memory(monkeypatch):
@@ -455,8 +805,10 @@ def test_run_flight_search_fallback_survives_state_lookup_failure(monkeypatch):
     result = nlu_service.run_flight_search("Singapore to Tokyo", session_id="state-failure-session")
 
     assert result["error_message"] is None
-    assert result["flight_query"]["from_airport"] == "SIN"
-    assert result["flight_query"]["to_airports"] == ["TYO"]
+    assert result["flight_query"] is None
+    assert result["clarification"]["partial_flight_query"]["from_airport"] == "SIN"
+    assert result["clarification"]["partial_flight_query"]["to_airports"] == ["TYO"]
+    assert "departure_date" in result["clarification"]["needed_fields"]
 
 
 def test_chat_demo_uses_fallback_query_without_short_circuit(monkeypatch):

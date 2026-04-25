@@ -1,6 +1,6 @@
 """NLU: Parse user intent from natural language using LangGraph agent."""
 
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 import re
 from uuid import uuid4
@@ -28,17 +28,29 @@ AIRLINE_HINTS: dict[str, tuple[str, ...]] = {
     "AK": ("airasia", "air asia", "ak"),
 }
 
-DIRECT_TRUE_HINTS = ("direct", "non-stop", "nonstop", "no layover", "直飞", "不转机")
+DIRECT_TRUE_HINTS = ("direct", "non-stop", "nonstop", "no layover")
 DIRECT_FALSE_HINTS = ("don't mind stops", "dont mind stops", "with stops is fine", "layover is fine")
 
 PRICE_MAX_PATTERN = re.compile(r"(?:under|below|less than|max(?:imum)?(?: price)?)[^\d]*(\d+(?:\.\d+)?)", re.I)
 PRICE_MIN_PATTERN = re.compile(r"(?:over|above|min(?:imum)?(?: price)?)[^\d]*(\d+(?:\.\d+)?)", re.I)
 PRICE_AROUND_PATTERN = re.compile(r"(?:around|about)[^\d]*(\d+(?:\.\d+)?)", re.I)
-ORIGIN_FROM_PATTERN = re.compile(r"\bfrom\s+([a-zA-Z\s]+?)(?:\s+\bto\b|$)", re.I)
+ORIGIN_FROM_PATTERN = re.compile(
+    r"\bfrom\s+([a-zA-Z\s]+?)(?:\s+\bto\b|,|$|\s+(?:june|jun|next|this|tomorrow|today|on)\b)",
+    re.I,
+)
 DESTINATION_TO_PATTERN = re.compile(
     r"\bto\s+([a-zA-Z\s]+?)(?:$|\s+(?:next|this|tomorrow|today|on|under|below|less|more|above|around|about|with|for|return|round)\b)",
     re.I,
 )
+DATE_RANGE_PATTERN = re.compile(
+    r"(?:june|jun)\s+(\d{1,2})(?:\s*(?:to|-)\s*(\d{1,2}))?",
+    re.I,
+)
+MONTH_ONLY_PATTERN = re.compile(r"\b(?:june|jun)\b", re.I)
+BROAD_DESTINATION_HINTS: dict[str, tuple[str, ...]] = {
+    "Europe": ("europe",),
+}
+HOLIDAY_DURATION_HINTS = ("for a few days", "few days")
 EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
 ALERT_HINTS = ("notify", "notify me", "email me", "send me", "alert me", "let me know")
 CANCEL_ALERT_HINTS = ("do not notify", "don't notify", "stop notify", "stop notifying", "cancel alert", "stop alert")
@@ -68,6 +80,7 @@ def _build_input_state(
         "user_input": message,
         "user_context": user_context or {},
         "flight_query": previous_state.get("flight_query"),
+        "clarification": previous_state.get("clarification"),
         "flight_preference": previous_state.get("flight_preference"),
         "alert_request": previous_state.get("alert_request"),
         "error_message": None,
@@ -98,6 +111,31 @@ def _safe_get_previous_state(session_id: str) -> dict:
         return {}
 
 
+def _append_history(result: dict, previous_history: list[dict], max_turns: int = 5) -> dict:
+    history = list(previous_history)
+    history.append(
+        {
+            "user_input": result.get("user_input"),
+            "flight_query": result.get("flight_query"),
+            "clarification": result.get("clarification"),
+            "flight_preference": result.get("flight_preference"),
+        }
+    )
+    result["history"] = history[-max_turns:]
+    return result
+
+
+def _persist_fallback_result(result: dict, session_id: str) -> None:
+    try:
+        graph.update_state({"configurable": {"thread_id": session_id}}, result)
+    except Exception:
+        logger.warning(
+            "Fallback parser state persistence failed",
+            extra={"session_id": session_id},
+            exc_info=True,
+        )
+
+
 def _match_airport_hint(text: str) -> str | None:
     normalized = text.lower()
     for airport_code, hints in AIRPORT_HINTS.items():
@@ -106,24 +144,34 @@ def _match_airport_hint(text: str) -> str | None:
     return None
 
 
-def _infer_origin(message: str, user_context: dict | None, previous_query: dict) -> str:
+def _infer_origin(message: str, user_context: dict | None, previous_query: dict) -> tuple[str | None, bool]:
     explicit_origin = None
     if origin_match := ORIGIN_FROM_PATTERN.search(message):
         explicit_origin = _match_airport_hint(origin_match.group(1))
+    if not explicit_origin and re.search(r"\bto\b", message, re.I):
+        explicit_origin = _match_airport_hint(re.split(r"\bto\b", message, flags=re.I)[0])
     if explicit_origin:
-        return explicit_origin
+        return explicit_origin, True
 
     previous_origin = previous_query.get("from_airport")
     if previous_origin:
-        return previous_origin
+        return previous_origin, True
 
     location = (user_context or {}).get("location") or ""
     time_zone = (user_context or {}).get("timeZone") or ""
     context_match = _match_airport_hint(f"{location} {time_zone}")
     if context_match:
-        return context_match
+        return context_match, True
 
-    return "SIN"
+    return None, False
+
+
+def _infer_destination_scope(message: str, previous_query: dict) -> str | None:
+    normalized = message.lower()
+    for scope, hints in BROAD_DESTINATION_HINTS.items():
+        if any(hint in normalized for hint in hints):
+            return scope
+    return previous_query.get("destination_scope")
 
 
 def _infer_destinations(message: str, previous_query: dict, from_airport: str | None) -> list[str]:
@@ -145,29 +193,93 @@ def _infer_destinations(message: str, previous_query: dict, from_airport: str | 
     if previous_destinations:
         return list(previous_destinations)
 
-    return ["TYO"]
+    return []
 
 
 def _infer_trip(message: str, previous_query: dict) -> str:
     normalized = message.lower()
-    if any(keyword in normalized for keyword in ("round trip", "round-trip", "return", "来回")):
+    if any(keyword in normalized for keyword in ("round trip", "round-trip", "return")):
         return "round_trip"
     return previous_query.get("trip") or "one_way"
 
 
-def _infer_dates(previous_query: dict, trip: str) -> tuple[str, str | None]:
-    today = datetime.now().strftime("%Y-%m-%d")
-    departure_date = previous_query.get("departure_date") or today
+def _has_holiday_duration_intent(message: str) -> bool:
+    normalized = message.lower()
+    return any(hint in normalized for hint in HOLIDAY_DURATION_HINTS)
 
-    if trip == "round_trip":
-        return_date = previous_query.get("return_date")
-        if not return_date:
-            return_date = (
-                datetime.strptime(departure_date, "%Y-%m-%d") + timedelta(days=7)
-            ).strftime("%Y-%m-%d")
+
+def _infer_dates(message: str, previous_query: dict) -> tuple[str | None, str | None]:
+    if match := DATE_RANGE_PATTERN.search(message):
+        year = datetime.now().year
+        month = 6
+        start_day = int(match.group(1))
+        end_day = int(match.group(2)) if match.group(2) else None
+
+        departure_date = f"{year:04d}-{month:02d}-{start_day:02d}"
+        return_date = f"{year:04d}-{month:02d}-{end_day:02d}" if end_day else None
         return departure_date, return_date
 
-    return departure_date, None
+    if MONTH_ONLY_PATTERN.search(message):
+        return None, None
+
+    return previous_query.get("departure_date"), previous_query.get("return_date")
+
+
+def _build_clarification(
+    *,
+    from_airport: str | None,
+    origin_reliable: bool,
+    to_airports: list[str],
+    destination_scope: str | None,
+    departure_date: str | None,
+    return_date: str | None,
+    trip: str,
+    holiday_duration_intent: bool,
+    partial_query: dict,
+) -> dict | None:
+    needed_fields: list[str] = []
+    if not origin_reliable or not from_airport:
+        needed_fields.append("origin")
+    if not to_airports and not destination_scope:
+        needed_fields.append("destination")
+    elif destination_scope and not to_airports:
+        needed_fields.append("destination_choice")
+    if not departure_date:
+        needed_fields.append("departure_date")
+    if (trip == "round_trip" or holiday_duration_intent) and not return_date:
+        needed_fields.append("return_date_or_duration")
+
+    if not needed_fields:
+        return None
+
+    question_parts: list[str] = []
+    if "origin" in needed_fields:
+        question_parts.append("where you will depart from")
+    if "destination" in needed_fields:
+        question_parts.append("which city or region you want to visit")
+    if "departure_date" in needed_fields:
+        question_parts.append("roughly when you want to depart")
+    if "return_date_or_duration" in needed_fields:
+        question_parts.append("how many days you will stay or when you will return")
+
+    if question_parts:
+        question = "Sure, I need to confirm " + ", ".join(question_parts) + "."
+    else:
+        label = destination_scope or "that region"
+        question = (
+            f"For {label}, would you like to choose specific cities, "
+            "or should I suggest 3-5 popular or lower-price cities?"
+        )
+
+    if destination_scope and "destination_choice" in needed_fields and question_parts:
+        question += f" For {destination_scope}, I can later suggest popular or lower-price cities."
+
+    return {
+        "needed_fields": needed_fields,
+        "question": question,
+        "partial_flight_query": partial_query,
+        "can_search": False,
+    }
 
 
 def _infer_preference(
@@ -279,81 +391,124 @@ def _fallback_result(
     message: str,
     user_context: dict | None,
     previous_state: dict,
+    session_id: str,
+    progress_id: str | None,
     error: Exception | str,
 ) -> dict:
     logger.info(
         "Fallback parser used",
-        extra={"session_id": previous_state.get("session_id")},
+        extra={"session_id": session_id},
     )
-    previous_query = previous_state.get("flight_query") or {}
+    previous_clarification = previous_state.get("clarification") or {}
+    previous_query = previous_state.get("flight_query") or previous_clarification.get("partial_flight_query") or {}
     previous_preference = dict(previous_state.get("flight_preference") or {})
     previous_history = list(previous_state.get("history") or [])
     previous_alert_request = dict(previous_state.get("alert_request") or {})
     context_filters = list((user_context or {}).get("filters") or [])
 
     trip = _infer_trip(message, previous_query)
-    from_airport = _infer_origin(message, user_context, previous_query)
+    holiday_duration_intent = _has_holiday_duration_intent(message)
+    if holiday_duration_intent:
+        trip = "round_trip"
+    from_airport, origin_reliable = _infer_origin(message, user_context, previous_query)
+    destination_scope = _infer_destination_scope(message, previous_query)
     to_airports = _infer_destinations(message, previous_query, from_airport)
-    departure_date, return_date = _infer_dates(previous_query, trip)
+    departure_date, return_date = _infer_dates(message, previous_query)
     inferred_preference = _infer_preference(message, previous_preference, context_filters)
     inferred_alert_request = _infer_alert_request(message, previous_alert_request)
 
-    if not to_airports:
-        return {
-            "session_id": previous_state.get("session_id"),
-            "progress_id": previous_state.get("progress_id"),
-            "user_input": message,
-            "user_context": user_context or {},
-            "flight_query": None,
-            "flight_preference": inferred_preference,
-            "alert_request": inferred_alert_request,
-            "error_message": (
-                "I couldn't resolve the destination into airport codes. "
-                "Please specify a city or airport."
-            ),
-            "flight_choices": None,
-            "history": previous_history,
-        }
+    partial_query = {
+        "from_airport": from_airport,
+        "to_airports": to_airports,
+        "destination_scope": destination_scope,
+        "departure_date": departure_date,
+        "return_date": return_date,
+        "passengers": previous_query.get("passengers") or 1,
+        "seat_classes": previous_query.get("seat_classes") or "economy",
+        "trip": trip,
+        "is_multi_destination": previous_query.get(
+            "is_multi_destination",
+            bool(destination_scope) or len(to_airports) > 1,
+        ),
+        "description_of_recommendation": previous_query.get("description_of_recommendation"),
+    }
+    partial_query = {
+        key: value for key, value in partial_query.items() if value not in (None, [], "")
+    }
 
     if from_airport in to_airports:
-        return {
-            "session_id": previous_state.get("session_id"),
-            "progress_id": previous_state.get("progress_id"),
+        return _append_history(
+            {
+                "session_id": session_id,
+                "progress_id": progress_id,
+                "user_input": message,
+                "user_context": user_context or {},
+                "flight_query": None,
+                "clarification": None,
+                "flight_preference": inferred_preference,
+                "alert_request": inferred_alert_request,
+                "error_message": (
+                    f"Your origin and destination both seem to be {from_airport}. "
+                    "Please specify a different destination."
+                ),
+                "flight_choices": None,
+            },
+            previous_history,
+        )
+
+    clarification = _build_clarification(
+        from_airport=from_airport,
+        origin_reliable=origin_reliable,
+        to_airports=to_airports,
+        destination_scope=destination_scope,
+        departure_date=departure_date,
+        return_date=return_date,
+        trip=trip,
+        holiday_duration_intent=holiday_duration_intent,
+        partial_query=partial_query,
+    )
+    if clarification:
+        return _append_history(
+            {
+                "session_id": session_id,
+                "progress_id": progress_id,
+                "user_input": message,
+                "user_context": user_context or {},
+                "flight_query": None,
+                "clarification": clarification,
+                "flight_preference": inferred_preference,
+                "alert_request": inferred_alert_request,
+                "error_message": None,
+                "flight_choices": None,
+            },
+            previous_history,
+        )
+
+    return _append_history(
+        {
+            "session_id": session_id,
+            "progress_id": progress_id,
             "user_input": message,
             "user_context": user_context or {},
-            "flight_query": None,
+            "flight_query": {
+                "from_airport": from_airport,
+                "to_airports": to_airports,
+                "departure_date": departure_date,
+                "return_date": return_date,
+                "passengers": previous_query.get("passengers") or 1,
+                "seat_classes": previous_query.get("seat_classes") or "economy",
+                "trip": trip,
+                "is_multi_destination": previous_query.get("is_multi_destination", len(to_airports) > 1),
+                "description_of_recommendation": previous_query.get("description_of_recommendation"),
+            },
+            "clarification": None,
             "flight_preference": inferred_preference,
             "alert_request": inferred_alert_request,
-            "error_message": (
-                f"Your origin and destination both seem to be {from_airport}. "
-                "Please specify a different destination."
-            ),
+            "error_message": None,
             "flight_choices": None,
-            "history": previous_history,
-        }
-
-    return {
-        "session_id": previous_state.get("session_id"),
-        "progress_id": previous_state.get("progress_id"),
-        "user_input": message,
-        "user_context": user_context or {},
-        "flight_query": {
-            "from_airport": from_airport,
-            "to_airports": to_airports,
-            "departure_date": departure_date,
-            "return_date": return_date,
-            "passengers": previous_query.get("passengers") or 1,
-            "seat_classes": previous_query.get("seat_classes") or "economy",
-            "trip": trip,
-            "is_multi_destination": previous_query.get("is_multi_destination", len(to_airports) > 1),
-            "description_of_recommendation": previous_query.get("description_of_recommendation"),
         },
-        "flight_preference": inferred_preference,
-        "alert_request": inferred_alert_request,
-        "error_message": None,
-        "flight_choices": None,
-        "history": previous_history,
-    }
+        previous_history,
+    )
 
 
 def run_flight_search(
@@ -397,7 +552,16 @@ def run_flight_search(
     except ProgressCancelledError:
         raise
     except Exception as e:
-        return _fallback_result(message, user_context, previous_state, e)
+        result = _fallback_result(
+            message,
+            user_context,
+            previous_state,
+            resolved_session_id,
+            progress_id,
+            e,
+        )
+        _persist_fallback_result(result, resolved_session_id)
+        return result
 
 
 def parse_flight_intent(message: str) -> dict:
@@ -407,6 +571,7 @@ def parse_flight_intent(message: str) -> dict:
     result = run_flight_search(message)
     return {
         "flight_query": result.get("flight_query"),
+        "clarification": result.get("clarification"),
         "flight_preference": result.get("flight_preference"),
         "error_message": result.get("error_message"),
     }

@@ -12,6 +12,7 @@ pixi.lock
 node_modules/
 dist/
 *.log
+logs/
 .DS_Store
 
 # Python build artifacts

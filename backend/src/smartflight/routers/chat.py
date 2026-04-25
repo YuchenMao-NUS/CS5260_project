@@ -148,6 +148,7 @@ def _to_alert_summary(record) -> AlertSummary:
 def _build_intent(result: dict) -> dict:
     return {
         "flight_query": result.get("flight_query"),
+        "clarification": result.get("clarification"),
         "flight_preference": result.get("flight_preference"),
         "error_message": result.get("error_message"),
     }
@@ -220,6 +221,7 @@ def _iter_response_events(
     alert_enabled = bool(alert_request.get("enabled"))
     alert_intent = str(alert_request.get("intent") or "").strip().lower()
     query_from_result = intent.get("flight_query") or {}
+    clarification = intent.get("clarification") or {}
 
     def _create_alert_from_available_query() -> tuple[str | None, str | None]:
         if not alert_enabled or not alert_email:
@@ -284,6 +286,21 @@ def _iter_response_events(
                 resultSetId=None,
                 alertId=alert_id,
                 alertStatus=alert_status,
+                description_of_recommendation=None,
+                intent=intent,
+            ),
+        }
+        return
+
+    if clarification and not clarification.get("can_search", True):
+        yield {
+            "type": "completed",
+            "data": ChatResponse(
+                reply=clarification.get("question") or "Could you share a bit more detail about the trip?",
+                flights=None,
+                resultSetId=None,
+                alertId=None,
+                alertStatus=None,
                 description_of_recommendation=None,
                 intent=intent,
             ),

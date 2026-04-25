@@ -1,4 +1,4 @@
-from typing import Any, TypedDict, Optional, List, Literal
+from typing import Any, NotRequired, TypedDict, Optional, List, Literal
 
 class FlightQuery(TypedDict):
     trip: Literal["one_way", "round_trip"]
@@ -10,6 +10,14 @@ class FlightQuery(TypedDict):
     passengers: int
     is_multi_destination: bool           # Determine whether it is a single destination or multiple destinations.
     description_of_recommendation: Optional[str]
+    destination_scope: NotRequired[Optional[str]]
+
+
+class Clarification(TypedDict):
+    needed_fields: List[str]
+    question: str
+    partial_flight_query: dict[str, Any]
+    can_search: bool
 
 
 class FlightPreference(TypedDict):
@@ -53,6 +61,7 @@ class AgentState(TypedDict):
     user_input: str                                # Original user input
     user_context: dict                             # Context passed from frontend (e.g. timezone, location)
     flight_query: Optional[FlightQuery]            # Extracted search parameters
+    clarification: Optional[Clarification]         # Follow-up question state when required search fields are missing
     flight_preference: Optional[FlightPreference]  # Extracted user preferences
     alert_request: Optional[dict]                  # Email alert request metadata from conversation
     flight_choices: Optional[List[FlightInformation]]

@@ -37,6 +37,7 @@ def join_extractions(state: AgentState) -> dict:
         {
             "user_input": state.get("user_input"),
             "flight_query": state.get("flight_query"),
+            "clarification": state.get("clarification"),
             "flight_preference": state.get("flight_preference"),
         }
     )
@@ -47,6 +48,9 @@ def join_extractions(state: AgentState) -> dict:
 
 def route_after_extraction(state: AgentState) -> str:
     if state.get("error_message"):
+        return "end"
+    clarification = state.get("clarification") or {}
+    if clarification and not clarification.get("can_search", True):
         return "end"
     return "search_flights"
 
