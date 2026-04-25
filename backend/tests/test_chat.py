@@ -140,8 +140,12 @@ def test_guardrail_accepts_duration_answer_to_pending_clarification(monkeypatch)
 def test_extract_query_turns_suggest_followup_into_europe_destinations(monkeypatch):
     """Suggesting cities for a broad region should produce searchable destinations."""
 
+    captured_messages = None
+
     class FakeCompletions:
         def parse(self, model, messages, response_format):
+            nonlocal captured_messages
+            captured_messages = messages
             parsed = response_format(
                 trip="one_way",
                 from_airport="SIN",
@@ -198,6 +202,66 @@ def test_extract_query_turns_suggest_followup_into_europe_destinations(monkeypat
     assert result["clarification"] is None
     assert result["flight_query"]["to_airports"] == ["LON", "PAR", "ROM", "AMS", "BCN"]
     assert result["flight_query"]["is_multi_destination"] is True
+    assert captured_messages is not None
+    prompt = captured_messages[0]["content"]
+    assert "Current pending clarification" in prompt
+    assert "partial_flight_query" in prompt
+    assert "destination_scope" in prompt
+    assert "stay for 7 days" in prompt
+
+
+def test_extract_query_uses_recommendations_for_broad_europe_destination(monkeypatch):
+    """Broad Europe requests should not ask the user to choose a city."""
+
+    class FakeCompletions:
+        def parse(self, model, messages, response_format):
+            parsed = response_format(
+                trip="one_way",
+                from_airport="SIN",
+                from_airport_source="explicit",
+                to_airports=None,
+                destination_scope="Europe",
+                destination_source="broad",
+                departure_date="2026-06-01",
+                departure_date_source="explicit",
+                return_date=None,
+                return_date_source="not_applicable",
+                seat_classes="economy",
+                passengers=1,
+                is_multi_destination=True,
+                holiday_duration_intent=False,
+                description_of_recommendation="popular European city options",
+            )
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))])
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key):
+            self.beta = SimpleNamespace(
+                chat=SimpleNamespace(completions=FakeCompletions())
+            )
+
+    monkeypatch.setattr(extract_query_module.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(extract_query_module, "OpenAI", FakeOpenAIClient)
+
+    result = extract_query_module.extract_query_node(
+        {
+            "session_id": "europe-anywhere-session",
+            "progress_id": None,
+            "user_input": "from Singapore to anywhere in Europe in June",
+            "user_context": {},
+            "flight_query": None,
+            "clarification": None,
+            "flight_preference": None,
+            "flight_choices": None,
+            "error_message": None,
+            "history": [],
+        }
+    )
+
+    assert result["error_message"] is None
+    assert result["clarification"] is None
+    assert result["flight_query"]["to_airports"] == ["LON", "PAR", "ROM", "AMS", "BCN"]
+    assert result["flight_query"]["destination_scope"] == "Europe"
 
 
 def _mock_chat_request_sync(monkeypatch, response: chat_router.ChatResponse) -> None:
@@ -603,9 +667,11 @@ def test_run_flight_search_fallback_europe_trip_clarifies(monkeypatch):
     clarification = result["clarification"]
     assert clarification["can_search"] is False
     assert "origin" in clarification["needed_fields"]
+    assert "destination_choice" not in clarification["needed_fields"]
     assert "departure_date" in clarification["needed_fields"]
     assert "return_date_or_duration" in clarification["needed_fields"]
     assert clarification["partial_flight_query"]["destination_scope"] == "Europe"
+    assert clarification["partial_flight_query"]["to_airports"] == ["LON", "PAR", "ROM", "AMS", "BCN"]
 
 
 def test_run_flight_search_fallback_tokyo_with_context_asks_for_date(monkeypatch):

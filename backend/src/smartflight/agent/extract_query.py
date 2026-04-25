@@ -13,14 +13,6 @@ from smartflight.services.progress import emit_progress, raise_if_progress_cance
 logger = logging.getLogger(__name__)
 
 IATA_CODE_PATTERN = re.compile(r"^[A-Z]{3}$")
-DESTINATION_SUGGESTION_HINTS = (
-    "suggest",
-    "recommend",
-    "recommendation",
-    "any city",
-    "anywhere",
-    "surprise me",
-)
 BROAD_DESTINATION_RECOMMENDATIONS = {
     "europe": ["LON", "PAR", "ROM", "AMS", "BCN"],
 }
@@ -71,15 +63,19 @@ def _normalize_destination_scope(value: Optional[str]) -> Optional[str]:
     return scope or None
 
 
-def _wants_destination_suggestions(user_input: str) -> bool:
-    normalized = user_input.lower()
-    return any(hint in normalized for hint in DESTINATION_SUGGESTION_HINTS)
-
-
 def _recommended_destinations_for_scope(destination_scope: Optional[str]) -> List[str]:
     if not destination_scope:
         return []
     return BROAD_DESTINATION_RECOMMENDATIONS.get(destination_scope.strip().lower(), [])
+
+
+def _resolve_broad_destination_recommendations(
+    destination_scope: Optional[str],
+    to_airports: List[str],
+) -> List[str]:
+    if to_airports:
+        return to_airports
+    return _recommended_destinations_for_scope(destination_scope)
 
 
 def _build_previous_context(history: Optional[List[dict]], max_turns: int = 5) -> str:
@@ -126,6 +122,28 @@ def _build_previous_context(history: Optional[List[dict]], max_turns: int = 5) -
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _build_active_state_context(state: AgentState) -> str:
+    context_parts: List[str] = []
+
+    clarification = state.get("clarification") or {}
+    if clarification and not clarification.get("can_search", True):
+        context_parts.append(
+            "Current pending clarification:\n"
+            f"needed_fields={clarification.get('needed_fields')}\n"
+            f"question={clarification.get('question')}\n"
+            f"partial_flight_query={clarification.get('partial_flight_query')}"
+        )
+
+    flight_query = state.get("flight_query")
+    if flight_query:
+        context_parts.append(f"Current saved flight query: {flight_query}")
+
+    if not context_parts:
+        return "No active pending clarification or saved query."
+
+    return "\n\n".join(context_parts)
 
 
 def _build_partial_query(
@@ -255,6 +273,7 @@ def extract_query_node(state: AgentState) -> AgentState:
 
     history = state.get("history")
     previous_context = _build_previous_context(history)
+    active_state_context = _build_active_state_context(state)
 
     logger.debug("=== previous_context (query) ===")
     for line in previous_context.split("\n"):
@@ -267,18 +286,22 @@ The user's current known location context is: {user_loc_str}.
 
 {previous_context}
 
+{active_state_context}
+
 CRITICAL INSTRUCTION:
-The previous context above is the conversation memory.
+The previous context and active state above are the conversation memory.
 The user may be refining an earlier request, answering a follow-up question, or providing missing information.
 You must use the previous context to infer the final merged query state.
 Do not discard previous constraints unless the user explicitly changes them or clearly implies a change.
+If there is a current pending clarification, merge the user's answer into its partial_flight_query.
+Preserve any fields from partial_flight_query that the user did not change.
 
 Extraction rules:
 1. from_airport: MUST use 3-letter IATA codes. Use explicit user input, previous context, or reliable location context. If unknown, leave null and set from_airport_source="missing". Never default to SIN without reliable context.
 2. to_airports: MUST use only 3-letter IATA codes for specific destinations. If the user gives a broad region like Europe, store it in destination_scope and leave to_airports null unless they already chose specific cities. Do not recommend default airports when the user has not chosen them.
 3. trip: Infer from context. Keywords like "round trip", "return", or "come back" mean round_trip. Phrases that mean staying or traveling for a few days imply round-trip/holiday duration intent and should set holiday_duration_intent=true.
-4. departure_date: If not mentioned, leave null and set departure_date_source="missing". Format: YYYY-MM-DD.
-5. return_date: Only set when explicitly mentioned or present in previous context. Do not default to departure_date + 7 days.
+4. departure_date: If not mentioned, leave null and set departure_date_source="missing". Format: YYYY-MM-DD. Coarse dates are acceptable because the assistant asks "roughly when": "next month" means the first day of next month, "in June" means June 1 of the current year, and "next Friday" means the next calendar Friday after today.
+5. return_date: Set this when the user gives either an explicit return date or a stay duration such as "stay for 7 days" / "for 1 week". If a stay duration is provided, compute return_date from the merged departure_date. Do not ask for duration again after it was provided.
 6. seat_classes: If not specified, return "economy".
 7. passengers: If not specified, default to 1.
 8. is_multi_destination: Set true for broad destination scopes or multiple destinations; false for one specific destination.
@@ -302,14 +325,31 @@ Return the fully merged final query state.
 
     extraction: FlightQueryExtraction = response.choices[0].message.parsed
 
+    logger.info(
+        "Query extraction parsed",
+        extra={
+            "trip": extraction.trip,
+            "from_airport": extraction.from_airport,
+            "from_airport_source": extraction.from_airport_source,
+            "to_airports": ",".join(extraction.to_airports or []),
+            "destination_scope": extraction.destination_scope,
+            "destination_source": extraction.destination_source,
+            "departure_date": extraction.departure_date,
+            "departure_date_source": extraction.departure_date_source,
+            "return_date": extraction.return_date,
+            "return_date_source": extraction.return_date_source,
+            "holiday_duration_intent": extraction.holiday_duration_intent,
+        },
+    )
+
     from_airport = _normalize_iata_code(extraction.from_airport)
     to_airports = _normalize_iata_codes(extraction.to_airports or [])
     destination_scope = _normalize_destination_scope(extraction.destination_scope)
     departure_date = extraction.departure_date
     return_date = extraction.return_date
 
-    if destination_scope and not to_airports and _wants_destination_suggestions(user_input):
-        to_airports = _recommended_destinations_for_scope(destination_scope)
+    if destination_scope and not to_airports:
+        to_airports = _resolve_broad_destination_recommendations(destination_scope, to_airports)
 
     if from_airport and from_airport in to_airports:
         return {

@@ -50,6 +50,9 @@ MONTH_ONLY_PATTERN = re.compile(r"\b(?:june|jun)\b", re.I)
 BROAD_DESTINATION_HINTS: dict[str, tuple[str, ...]] = {
     "Europe": ("europe",),
 }
+BROAD_DESTINATION_RECOMMENDATIONS: dict[str, list[str]] = {
+    "Europe": ["LON", "PAR", "ROM", "AMS", "BCN"],
+}
 HOLIDAY_DURATION_HINTS = ("for a few days", "few days")
 EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
 ALERT_HINTS = ("notify", "notify me", "email me", "send me", "alert me", "let me know")
@@ -194,6 +197,12 @@ def _infer_destinations(message: str, previous_query: dict, from_airport: str | 
         return list(previous_destinations)
 
     return []
+
+
+def _recommended_destinations_for_scope(destination_scope: str | None) -> list[str]:
+    if not destination_scope:
+        return []
+    return list(BROAD_DESTINATION_RECOMMENDATIONS.get(destination_scope, []))
 
 
 def _infer_trip(message: str, previous_query: dict) -> str:
@@ -413,6 +422,8 @@ def _fallback_result(
     from_airport, origin_reliable = _infer_origin(message, user_context, previous_query)
     destination_scope = _infer_destination_scope(message, previous_query)
     to_airports = _infer_destinations(message, previous_query, from_airport)
+    if destination_scope and not to_airports:
+        to_airports = _recommended_destinations_for_scope(destination_scope)
     departure_date, return_date = _infer_dates(message, previous_query)
     inferred_preference = _infer_preference(message, previous_preference, context_filters)
     inferred_alert_request = _infer_alert_request(message, previous_alert_request)
@@ -484,23 +495,27 @@ def _fallback_result(
             previous_history,
         )
 
+    flight_query = {
+        "from_airport": from_airport,
+        "to_airports": to_airports,
+        "departure_date": departure_date,
+        "return_date": return_date,
+        "passengers": previous_query.get("passengers") or 1,
+        "seat_classes": previous_query.get("seat_classes") or "economy",
+        "trip": trip,
+        "is_multi_destination": previous_query.get("is_multi_destination", len(to_airports) > 1),
+        "description_of_recommendation": previous_query.get("description_of_recommendation"),
+    }
+    if destination_scope:
+        flight_query["destination_scope"] = destination_scope
+
     return _append_history(
         {
             "session_id": session_id,
             "progress_id": progress_id,
             "user_input": message,
             "user_context": user_context or {},
-            "flight_query": {
-                "from_airport": from_airport,
-                "to_airports": to_airports,
-                "departure_date": departure_date,
-                "return_date": return_date,
-                "passengers": previous_query.get("passengers") or 1,
-                "seat_classes": previous_query.get("seat_classes") or "economy",
-                "trip": trip,
-                "is_multi_destination": previous_query.get("is_multi_destination", len(to_airports) > 1),
-                "description_of_recommendation": previous_query.get("description_of_recommendation"),
-            },
+            "flight_query": flight_query,
             "clarification": None,
             "flight_preference": inferred_preference,
             "alert_request": inferred_alert_request,
