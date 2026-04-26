@@ -13,9 +13,7 @@ from smartflight.services.progress import emit_progress, raise_if_progress_cance
 logger = logging.getLogger(__name__)
 
 IATA_CODE_PATTERN = re.compile(r"^[A-Z]{3}$")
-BROAD_DESTINATION_RECOMMENDATIONS = {
-    "europe": ["LON", "PAR", "ROM", "AMS", "BCN"],
-}
+MAX_DESTINATION_AIRPORTS = 5
 
 
 class FlightQueryExtraction(BaseModel):
@@ -61,21 +59,6 @@ def _normalize_destination_scope(value: Optional[str]) -> Optional[str]:
         return None
     scope = value.strip()
     return scope or None
-
-
-def _recommended_destinations_for_scope(destination_scope: Optional[str]) -> List[str]:
-    if not destination_scope:
-        return []
-    return BROAD_DESTINATION_RECOMMENDATIONS.get(destination_scope.strip().lower(), [])
-
-
-def _resolve_broad_destination_recommendations(
-    destination_scope: Optional[str],
-    to_airports: List[str],
-) -> List[str]:
-    if to_airports:
-        return to_airports
-    return _recommended_destinations_for_scope(destination_scope)
 
 
 def _build_previous_context(history: Optional[List[dict]], max_turns: int = 5) -> str:
@@ -298,7 +281,14 @@ Preserve any fields from partial_flight_query that the user did not change.
 
 Extraction rules:
 1. from_airport: MUST use 3-letter IATA codes. Use explicit user input, previous context, or reliable location context. If unknown, leave null and set from_airport_source="missing". Never default to SIN without reliable context.
-2. to_airports: MUST use only 3-letter IATA codes for specific destinations. If the user gives a broad region like Europe, store it in destination_scope and leave to_airports null unless they already chose specific cities. Do not recommend default airports when the user has not chosen them.
+2. Destination handling:
+    - Users usually name cities, countries, regions, or trip themes; they usually do not know airport codes. Convert specific city or airport names into suitable 3-letter IATA AIRPORT codes in to_airports.
+    - Do NOT output metropolitan/city umbrella codes (for example: NYC, LON, PAR, TYO). Those are not airport codes and can break downstream follow-up search.
+    - For city requests, choose one or more concrete airport codes. Example: New York should map to JFK/EWR/LGA (not NYC). Do not ask for specific airports just because a city has multiple airports.
+   - Treat a destination as specific when the user names a city, metro area, airport, or a small explicit list of cities/airports. Put those resolved codes in to_airports and leave destination_scope null unless a broader scope is also useful context.
+   - Treat a destination as broad when the user names a country, region, continent, or open-ended category that could reasonably map to more than 5 airport codes, such as Japan, France, Europe, Southeast Asia, beach destinations, or anywhere cheap. In that case set destination_scope, set destination_source="broad", and leave to_airports null so the assistant can ask whether the user has specific cities/airports or wants suggestions.
+    - If there is a pending destination_choice clarification and the user asks you to suggest/recommend/choose destinations, choose 3-5 suitable concrete destination airport codes yourself and put them in to_airports.
+   - Never return more than 5 destination codes.
 3. trip: Infer from context. Keywords like "round trip", "return", or "come back" mean round_trip. Phrases that mean staying or traveling for a few days imply round-trip/holiday duration intent and should set holiday_duration_intent=true.
 4. departure_date: If not mentioned, leave null and set departure_date_source="missing". Format: YYYY-MM-DD. Coarse dates are acceptable because the assistant asks "roughly when": "next month" means the first day of next month, "in June" means June 1 of the current year, and "next Friday" means the next calendar Friday after today.
 5. return_date: Set this when the user gives either an explicit return date or a stay duration such as "stay for 7 days" / "for 1 week". If a stay duration is provided, compute return_date from the merged departure_date. Do not ask for duration again after it was provided.
@@ -323,7 +313,14 @@ Return the fully merged final query state.
         response_format=FlightQueryExtraction,
     )
 
-    extraction: FlightQueryExtraction = response.choices[0].message.parsed
+    parsed = response.choices[0].message.parsed
+    if parsed is None:
+        logger.error("[extract_query] llm_parse_empty_result")
+        raise ValueError("LLM returned empty parsed result")
+
+    extraction: FlightQueryExtraction = parsed
+
+    logger.debug("[extract_query] llm_parsed=%s", extraction.model_dump_json(exclude_none=False))
 
     logger.info(
         "Query extraction parsed",
@@ -348,10 +345,30 @@ Return the fully merged final query state.
     departure_date = extraction.departure_date
     return_date = extraction.return_date
 
-    if destination_scope and not to_airports:
-        to_airports = _resolve_broad_destination_recommendations(destination_scope, to_airports)
+    logger.debug(
+        "[extract_query] normalized_result trip=%s from=%s to=%s scope=%s dep=%s ret=%s class=%s passengers=%s multi=%s",
+        extraction.trip,
+        from_airport,
+        ",".join(to_airports),
+        destination_scope,
+        departure_date,
+        return_date,
+        extraction.seat_classes,
+        extraction.passengers,
+        extraction.is_multi_destination,
+    )
+
+    if len(to_airports) > MAX_DESTINATION_AIRPORTS:
+        logger.debug(
+            "[extract_query] destination_count_exceeded count=%s max=%s; convert to scope clarification",
+            len(to_airports),
+            MAX_DESTINATION_AIRPORTS,
+        )
+        destination_scope = destination_scope or "the requested destination area"
+        to_airports = []
 
     if from_airport and from_airport in to_airports:
+        logger.debug("[extract_query] invalid_same_origin_destination code=%s", from_airport)
         return {
             "flight_query": None,
             "clarification": None,
@@ -370,6 +387,11 @@ Return the fully merged final query state.
         return_date=return_date,
     )
     if clarification:
+        logger.debug(
+            "[extract_query] clarification_required needed_fields=%s partial_query=%s",
+            ",".join(clarification.get("needed_fields", [])),
+            clarification.get("partial_flight_query"),
+        )
         return {
             "flight_query": None,
             "clarification": clarification,
@@ -377,6 +399,7 @@ Return the fully merged final query state.
         }
 
     if not to_airports:
+        logger.debug("[extract_query] destination_unresolved_after_normalization")
         return {
             "flight_query": None,
             "clarification": None,

@@ -150,7 +150,7 @@ def test_extract_query_turns_suggest_followup_into_europe_destinations(monkeypat
                 trip="one_way",
                 from_airport="SIN",
                 from_airport_source="previous",
-                to_airports=None,
+                to_airports=["LON", "PAR", "ROM", "AMS", "BCN"],
                 destination_scope="Europe",
                 destination_source="previous",
                 departure_date="2026-05-02",
@@ -210,8 +210,8 @@ def test_extract_query_turns_suggest_followup_into_europe_destinations(monkeypat
     assert "stay for 7 days" in prompt
 
 
-def test_extract_query_uses_recommendations_for_broad_europe_destination(monkeypatch):
-    """Broad Europe requests should not ask the user to choose a city."""
+def test_extract_query_asks_for_choice_for_broad_europe_destination(monkeypatch):
+    """Broad Europe requests should ask before expanding into destination codes."""
 
     class FakeCompletions:
         def parse(self, model, messages, response_format):
@@ -259,9 +259,118 @@ def test_extract_query_uses_recommendations_for_broad_europe_destination(monkeyp
     )
 
     assert result["error_message"] is None
+    assert result["flight_query"] is None
+    assert result["clarification"]["needed_fields"] == ["destination_choice"]
+    assert result["clarification"]["partial_flight_query"]["destination_scope"] == "Europe"
+    assert "specific cities" in result["clarification"]["question"]
+
+
+def test_extract_query_resolves_city_without_destination_choice(monkeypatch):
+    """A city destination should resolve to airport codes without asking for cities."""
+
+    class FakeCompletions:
+        def parse(self, model, messages, response_format):
+            parsed = response_format(
+                trip="one_way",
+                from_airport="SIN",
+                from_airport_source="explicit",
+                to_airports=["CDG", "ORY"],
+                destination_scope=None,
+                destination_source="explicit",
+                departure_date="2026-06-01",
+                departure_date_source="explicit",
+                return_date=None,
+                return_date_source="not_applicable",
+                seat_classes="economy",
+                passengers=1,
+                is_multi_destination=True,
+                holiday_duration_intent=False,
+                description_of_recommendation="Paris airport options",
+            )
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))])
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key):
+            self.beta = SimpleNamespace(
+                chat=SimpleNamespace(completions=FakeCompletions())
+            )
+
+    monkeypatch.setattr(extract_query_module.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(extract_query_module, "OpenAI", FakeOpenAIClient)
+
+    result = extract_query_module.extract_query_node(
+        {
+            "session_id": "paris-city-session",
+            "progress_id": None,
+            "user_input": "from Singapore to Paris in June",
+            "user_context": {},
+            "flight_query": None,
+            "clarification": None,
+            "flight_preference": None,
+            "flight_choices": None,
+            "error_message": None,
+            "history": [],
+        }
+    )
+
+    assert result["error_message"] is None
     assert result["clarification"] is None
-    assert result["flight_query"]["to_airports"] == ["LON", "PAR", "ROM", "AMS", "BCN"]
-    assert result["flight_query"]["destination_scope"] == "Europe"
+    assert result["flight_query"]["to_airports"] == ["CDG", "ORY"]
+
+
+def test_extract_query_asks_for_choice_when_llm_returns_too_many_destinations(monkeypatch):
+    """Over-broad destination expansions should not search more than five airport codes."""
+
+    class FakeCompletions:
+        def parse(self, model, messages, response_format):
+            parsed = response_format(
+                trip="one_way",
+                from_airport="SIN",
+                from_airport_source="explicit",
+                to_airports=["CDG", "ORY", "BVA", "LYS", "MRS", "NCE"],
+                destination_scope="France",
+                destination_source="broad",
+                departure_date="2026-06-01",
+                departure_date_source="explicit",
+                return_date=None,
+                return_date_source="not_applicable",
+                seat_classes="economy",
+                passengers=1,
+                is_multi_destination=True,
+                holiday_duration_intent=False,
+                description_of_recommendation="French city options",
+            )
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))])
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key):
+            self.beta = SimpleNamespace(
+                chat=SimpleNamespace(completions=FakeCompletions())
+            )
+
+    monkeypatch.setattr(extract_query_module.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(extract_query_module, "OpenAI", FakeOpenAIClient)
+
+    result = extract_query_module.extract_query_node(
+        {
+            "session_id": "france-too-broad-session",
+            "progress_id": None,
+            "user_input": "from Singapore to France in June",
+            "user_context": {},
+            "flight_query": None,
+            "clarification": None,
+            "flight_preference": None,
+            "flight_choices": None,
+            "error_message": None,
+            "history": [],
+        }
+    )
+
+    assert result["error_message"] is None
+    assert result["flight_query"] is None
+    assert result["clarification"]["needed_fields"] == ["destination_choice"]
+    assert result["clarification"]["partial_flight_query"]["destination_scope"] == "France"
+    assert "to_airports" not in result["clarification"]["partial_flight_query"]
 
 
 def _mock_chat_request_sync(monkeypatch, response: chat_router.ChatResponse) -> None:
