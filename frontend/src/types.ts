@@ -51,10 +51,14 @@ export interface ChatResponse {
 }
 
 export type ChatProgressStage =
-  | 'analyzing_request'
+  | 'starting_pipeline'
+  | 'checking_intent'
+  | 'extracting_query'
+  | 'extracting_preferences'
   | 'searching_flights'
-  | 'formatting_results'
-  | 'generating_summary'
+  | 'ranking_results'
+  | 'preparing_results'
+  | 'writing_recommendation'
 
 export interface ChatProgressEvent {
   type: 'progress'

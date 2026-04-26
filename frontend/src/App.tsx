@@ -19,10 +19,14 @@ function formatLoadingTitle(message: string | null) {
 }
 
 const STAGE_SUBTEXT: Record<ChatProgressStage, string> = {
-  analyzing_request: 'Understanding your request before we look for flights.',
+  starting_pipeline: 'Starting the request pipeline.',
+  checking_intent: 'Checking that this is a flight-search request.',
+  extracting_query: 'Reading route, date, passenger, and destination details.',
+  extracting_preferences: 'Reading airline, price, stop, and duration preferences.',
   searching_flights: 'Checking live route combinations and available options.',
-  formatting_results: 'Formatting the results for display.',
-  generating_summary: 'Writing a short recommendation based on what was found.',
+  ranking_results: 'Ranking and filtering the available options.',
+  preparing_results: 'Preparing the results for display.',
+  writing_recommendation: 'Writing a short recommendation based on what was found.',
 }
 
 interface MessageRecord {
@@ -204,7 +208,7 @@ export default function App() {
 
     setMessages(prev => [...prev, { id: createMessageId(), role: 'user', content: finalMessageText }])
     setLoading(true)
-    setLoadingMessage('AI is analyzing your request...')
+    setLoadingMessage('Starting the flight request pipeline...')
 
     try {
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'

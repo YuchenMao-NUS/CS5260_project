@@ -275,7 +275,7 @@ def _attach_booking_url(
     if progress_id and progress_label:
         emit_progress(
             progress_id,
-            "formatting_results",
+            "preparing_results",
             f"Fetching booking link for {progress_label}...",
         )
 
@@ -327,7 +327,7 @@ def _attach_booking_urls_in_parallel(
                     completed_count += 1
                     emit_progress(
                         progress_id,
-                        "formatting_results",
+                        "preparing_results",
                         f"Finished booking link check for {choices[idx]['from_airport']} -> {choices[idx]['to_airport']} ({completed_count}/{len(choices)})...",
                     )
             except Exception:
@@ -385,7 +385,7 @@ def filter_flights_node(state: AgentState) -> AgentState:
         }
 
     try:
-        emit_progress(progress_id, "formatting_results", "Ranking and filtering flight results...")
+        emit_progress(progress_id, "ranking_results", "Ranking and filtering flight results...")
         logger.info(
             "Filtering flight choices started",
             extra={

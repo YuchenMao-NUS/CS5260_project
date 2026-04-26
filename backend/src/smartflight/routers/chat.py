@@ -309,7 +309,7 @@ def _iter_response_events(
 
     yield {
         "type": "progress",
-        "stage": "formatting_results",
+        "stage": "preparing_results",
         "message": "Preparing results for display...",
     }
 
@@ -361,7 +361,7 @@ def _iter_response_events(
 
     yield {
         "type": "progress",
-        "stage": "generating_summary",
+        "stage": "writing_recommendation",
         "message": "Generating recommendation summary...",
     }
 
@@ -472,8 +472,8 @@ async def _stream_chat_request(
                 )
                 emit_progress(
                     progress_id,
-                    "analyzing_request",
-                    "AI is analyzing your request...",
+                    "starting_pipeline",
+                    "Starting the flight request pipeline...",
                 )
                 _run_chat_request_sync(
                     chat_request.message,

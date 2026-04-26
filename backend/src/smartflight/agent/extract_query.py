@@ -257,7 +257,7 @@ def extract_query_node(state: AgentState) -> AgentState:
 
     emit_progress(
         state.get("progress_id"),
-        "analyzing_request",
+        "extracting_query",
         "Extracting route, dates, passengers, and destination details...",
     )
     raise_if_progress_cancelled(state.get("progress_id"))

@@ -144,7 +144,7 @@ def extract_preference_node(state: AgentState) -> AgentState:
 
     emit_progress(
         state.get("progress_id"),
-        "analyzing_request",
+        "extracting_preferences",
         "Identifying airline, price, stop, and duration preferences...",
     )
     raise_if_progress_cancelled(state.get("progress_id"))

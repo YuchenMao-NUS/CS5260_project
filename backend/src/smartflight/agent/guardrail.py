@@ -89,7 +89,7 @@ def intent_guardrail_node(state: AgentState) -> AgentState:
     client = OpenAI(api_key=api_key) if api_key else None
     emit_progress(
         state.get("progress_id"),
-        "analyzing_request",
+        "checking_intent",
         "Checking whether your request is flight-related...",
     )
     raise_if_progress_cancelled(state.get("progress_id"))
