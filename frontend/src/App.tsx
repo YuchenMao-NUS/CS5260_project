@@ -262,7 +262,7 @@ export default function App() {
           {messages.length === 0 && (
             <div className="welcome">
               <p>Tell me your travel plans in natural language.</p>
-              <p className="hint">e.g. &quot;Singapore to Malaysia next month, budget 500 SGD&quot; or type &quot;demo&quot; for sample flights with filters.</p>
+              <p className="hint">e.g. &quot;I want a 7 days trip to Paris next month&quot;</p>
             </div>
           )}
           {messages.map((m, i) => (
@@ -313,7 +313,7 @@ export default function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-              placeholder="Describe your trip..."
+              placeholder={messages.length === 0 ? 'I want a 7 days trip to Paris next month' : ''}
               disabled={loading}
             />
             <button onClick={sendMessage} disabled={loading || !input.trim()}>
